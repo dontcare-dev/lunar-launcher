@@ -58,7 +58,6 @@ fn merge(mut base: InstalledVersion, profile: &Value, instance: &Path, root: &Pa
     if let Some(legacy) = profile.get("minecraftArguments").and_then(Value::as_str) { base.metadata["minecraftArguments"] = json!(legacy); }
     if let Some(java) = profile.get("javaVersion") { base.metadata["javaVersion"] = java.clone(); }
     base.id = profile.get("id").and_then(Value::as_str).unwrap_or(&base.id).to_owned();
-    base.directory = instance.to_path_buf();
     base.game_directory = Some(instance.to_path_buf());
     base.natives = root.join("versions").join(&base.id).join("natives");
     fs::create_dir_all(&base.natives)?;

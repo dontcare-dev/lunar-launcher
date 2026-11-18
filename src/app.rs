@@ -132,7 +132,7 @@ impl LunarApp {
             snapshots: preferences.snapshots,
             status: "Ready".into(),
             accent: Color32::from_rgb(137, 169, 232),
-            game_root,
+            game_root: game_root.clone(),
             installed_ids,
             installed_version: None,
             install_rx: None,

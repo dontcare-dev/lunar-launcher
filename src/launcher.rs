@@ -511,7 +511,7 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     if runtime_major < required_major {
         bail!("Minecraft {} requires Java {}, but the detected runtime is Java {}", installed.id, required_major, runtime_major);
     }
-    let assets_dir = game_dir.join("assets");
+    let assets_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(game_dir).join("assets");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = installed.libraries.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join(separator);
     let classpath_arg = installed.metadata.pointer("/arguments/jvm")
