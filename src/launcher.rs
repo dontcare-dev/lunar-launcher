@@ -269,10 +269,10 @@ fn download_assets(
                 let task = queue.lock().ok().and_then(|mut queue| queue.pop_front());
                 let Some((url, path, hash)) = task else { break };
                 if let Err(error) = download(&http, &url, &path, Some(&hash)) {
-                    if let Ok(mut slot) = failure.lock() {
-                        if slot.is_none() {
-                            *slot = Some(format!("{error:#}"));
-                        }
+                    if let Ok(mut slot) = failure.lock()
+                        && slot.is_none()
+                    {
+                        *slot = Some(format!("{error:#}"));
                     }
                     break;
                 }
@@ -327,9 +327,8 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     let mut libraries = Vec::new();
     let entries = metadata.get("libraries").and_then(Value::as_array).cloned().unwrap_or_default();
     let total = entries.len();
-    let mut completed = 0;
-    for library in entries {
-        completed += 1;
+    for (index, library) in entries.into_iter().enumerate() {
+        let completed = index + 1;
         if !rules_allow(&library) {
             progress(InstallProgress { phase: "Libraries".into(), completed, total });
             continue;
@@ -345,13 +344,13 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
                 download(&http, url, &path, artifact.get("sha1").and_then(Value::as_str))?;
                 libraries.push(path);
             }
-        } else if let Some(coordinate) = library.get("name").and_then(Value::as_str) {
-            if let Some(relative) = maven_artifact_path(coordinate, None) {
-                let path = libraries_root.join(&relative);
-                let url = format!("{}/{}", base_url.trim_end_matches('/'), relative);
-                download(&http, &url, &path, None)?;
-                libraries.push(path);
-            }
+        } else if let Some(coordinate) = library.get("name").and_then(Value::as_str)
+            && let Some(relative) = maven_artifact_path(coordinate, None)
+        {
+            let path = libraries_root.join(&relative);
+            let url = format!("{}/{}", base_url.trim_end_matches('/'), relative);
+            download(&http, &url, &path, None)?;
+            libraries.push(path);
         }
         let native_key = library.get("natives")
             .and_then(|natives| natives.get(current_os()))
@@ -406,14 +405,14 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     let objects = asset_index.get("objects").and_then(Value::as_object).context("Asset index objects missing")?;
     download_assets(&http, root, objects, &mut progress)?;
     materialize_legacy_assets(root, &asset_index, objects, asset_index_id)?;
-    if let Some(logging_file) = metadata.pointer("/logging/client/file") {
-        if let (Some(id), Some(url)) = (
+    if let Some(logging_file) = metadata.pointer("/logging/client/file")
+        && let (Some(id), Some(url)) = (
             logging_file.get("id").and_then(Value::as_str),
             logging_file.get("url").and_then(Value::as_str),
-        ) {
-            let path = root.join("assets").join("log_configs").join(id);
-            download(&http, url, &path, logging_file.get("sha1").and_then(Value::as_str))?;
-        }
+        )
+    {
+        let path = root.join("assets").join("log_configs").join(id);
+        download(&http, url, &path, logging_file.get("sha1").and_then(Value::as_str))?;
     }
 
     libraries.push(client_jar.clone());
@@ -438,13 +437,13 @@ fn allowed_arguments(value: &Value) -> Vec<String> {
     for item in items {
         if let Some(text) = item.as_str() {
             output.push(text.to_owned());
-        } else if item.is_object() && rules_allow(item) {
-            if let Some(values) = item.get("value") {
-                if let Some(text) = values.as_str() {
-                    output.push(text.to_owned());
-                } else if let Some(values) = values.as_array() {
-                    output.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
-                }
+        } else if item.is_object() && rules_allow(item)
+            && let Some(values) = item.get("value")
+        {
+            if let Some(text) = values.as_str() {
+                output.push(text.to_owned());
+            } else if let Some(values) = values.as_array() {
+                output.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
             }
         }
     }
@@ -506,10 +505,10 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     let mut game = installed.metadata.pointer("/arguments/game")
         .map(allowed_arguments)
         .unwrap_or_default();
-    if game.is_empty() {
-        if let Some(legacy) = installed.metadata.get("minecraftArguments").and_then(Value::as_str) {
-            game = shlex::split(legacy).unwrap_or_else(|| legacy.split_whitespace().map(str::to_owned).collect());
-        }
+    if game.is_empty()
+        && let Some(legacy) = installed.metadata.get("minecraftArguments").and_then(Value::as_str)
+    {
+        game = shlex::split(legacy).unwrap_or_else(|| legacy.split_whitespace().map(str::to_owned).collect());
     }
     let substitutions = [
         ("${natives_directory}", installed.natives.to_string_lossy().into_owned()),
