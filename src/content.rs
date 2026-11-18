@@ -122,9 +122,14 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         let mut downloaded = None;
         for url in &item.downloads {
             if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status)
-                && let Ok(bytes) = response.bytes() {
-                    let valid = item.hashes.get("sha1").is_none_or(|expected| format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected));
-                    if valid { downloaded = Some(bytes); break; }
+                && let Ok(bytes) = response.bytes()
+            {
+                let valid = item.hashes.get("sha1").is_none_or(|expected| {
+                    format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+                });
+                if valid {
+                    downloaded = Some(bytes);
+                    break;
                 }
             }
         }
