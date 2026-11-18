@@ -933,7 +933,14 @@ impl eframe::App for LunarApp {
                 Err(error) => self.status = error,
             }
         }
-        if let Some(rx) = &self.server_rx\n            && let Ok(results) = rx.try_recv()\n        {\n            for (address, result) in results {\n                self.server_statuses.insert(address, result.unwrap_or_else(|_| crate::server::ServerStatus::default()));\n            }\n            self.server_rx = None;\n        }\n        if self.content_search_rx.is_some()
+        if let Some(rx) = &self.server_rx
+            && let Ok(results) = rx.try_recv()
+        {
+            for (address, result) in results {
+                self.server_statuses.insert(address, result.unwrap_or_else(|_| crate::server::ServerStatus::default()));
+            }
+            self.server_rx = None;
+        }\n        if self.content_search_rx.is_some()
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
