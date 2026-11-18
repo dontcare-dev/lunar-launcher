@@ -440,7 +440,8 @@ impl LunarApp {
 
 impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_versions(ctx);\n        self.poll_launcher(ctx);
+        self.poll_versions(ctx);
+        self.poll_launcher(ctx);
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))
