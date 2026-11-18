@@ -469,6 +469,10 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
 
 pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion> {
     let directory = root.join("versions").join(version_id);
+    let marker = directory.join(".lunar-installed");
+    if !marker.exists() {
+        bail!("Minecraft {version_id} has not completed installation");
+    }
     let metadata_path = directory.join(format!("{version_id}.json"));
     let metadata: Value = serde_json::from_slice(&fs::read(&metadata_path)
         .with_context(|| format!("Version {version_id} is not installed"))?)?;
