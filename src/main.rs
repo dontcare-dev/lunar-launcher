@@ -1,5 +1,6 @@
 mod app;
 mod minecraft;
+mod launcher;
 mod profiles;
 
 fn main() -> eframe::Result<()> {
