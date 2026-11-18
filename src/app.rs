@@ -1,6 +1,6 @@
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
-use std::{fs, path::PathBuf, process::Child, sync::mpsc::{self, Receiver, TryRecvError}};
+use std::{fs, path::PathBuf, process::{Child, Command}, sync::mpsc::{self, Receiver, TryRecvError}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -457,6 +457,18 @@ impl LunarApp {
                             ui.label(RichText::new("Installed").size(10.0).color(self.accent));
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if self.installed_ids.contains(&version.id) && ui.small_button("Remove").clicked() {
+                                match launcher::remove_version(&version.id, &self.game_root) {
+                                    Ok(()) => {
+                                        self.installed_ids.remove(&version.id);
+                                        if self.installed_version.as_ref().is_some_and(|installed| installed.id == version.id) {
+                                            self.installed_version = None;
+                                        }
+                                        self.status = format!("Removed Minecraft {}", version.id);
+                                    }
+                                    Err(error) => self.status = error.to_string(),
+                                }
+                            }
                             ui.label(RichText::new(version.release_time.get(..10).unwrap_or("")).size(11.0).color(Color32::GRAY));
                         });
                     });
@@ -556,6 +568,27 @@ impl LunarApp {
             ui.label(RichText::new("GAME DIRECTORY").strong());
             ui.label(self.game_root.display().to_string());
             ui.label("Minecraft versions, libraries, assets and logs are stored locally.");
+            if ui.button("Open game directory").clicked() {
+                let result = if cfg!(target_os = "windows") {
+                    Command::new("explorer").arg(&self.game_root).spawn()
+                } else if cfg!(target_os = "macos") {
+                    Command::new("open").arg(&self.game_root).spawn()
+                } else {
+                    Command::new("xdg-open").arg(&self.game_root).spawn()
+                };
+                self.status = result.map(|_| "Opened game directory".to_owned()).unwrap_or_else(|error| format!("Could not open game directory: {error}"));
+            }
+            if ui.button("Open game log").clicked() {
+                let log = self.game_root.join("logs").join("lunar-game.log");
+                let result = if cfg!(target_os = "windows") {
+                    Command::new("notepad").arg(&log).spawn()
+                } else if cfg!(target_os = "macos") {
+                    Command::new("open").arg(&log).spawn()
+                } else {
+                    Command::new("xdg-open").arg(&log).spawn()
+                };
+                self.status = result.map(|_| "Opened game log".to_owned()).unwrap_or_else(|error| format!("Could not open game log: {error}"));
+            }
         });
     }
 }
