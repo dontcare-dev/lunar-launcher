@@ -121,7 +121,7 @@ mod tests {
         let first = OfflineProfile::create("LunarPlayer").unwrap();
         let second = OfflineProfile::create("LunarPlayer").unwrap();
         assert_eq!(first.uuid, second.uuid);
-        assert_eq!(first.uuid.len(), 36);
+        assert_eq!(first.uuid.len(), 36);\n        assert_eq!(OfflineProfile::create("Notch").unwrap().uuid, "b50ad385-829d-3141-a216-7e7d7539ba7f");
     }
 
     #[test]
