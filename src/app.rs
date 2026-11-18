@@ -131,18 +131,18 @@ impl LunarApp {
             }
             _ => {}
         }
-        if let Some(process) = &mut self.game_process {
-            match process.try_wait() {
-                Ok(Some(status)) => {
-                    self.status = format!("Minecraft exited with {status}");
-                    self.game_process = None;
-                }
-                Ok(None) => self.status = "Minecraft is running".into(),
-                Err(error) => {
-                    self.status = format!("Could not read Minecraft process: {error}");
-                    self.game_process = None;
-                }
+        let process_state = self.game_process.as_mut().map(Child::try_wait);
+        match process_state {
+            Some(Ok(Some(status))) => {
+                self.status = format!("Minecraft exited with {status}");
+                self.game_process = None;
             }
+            Some(Ok(None)) => self.status = "Minecraft is running".into(),
+            Some(Err(error)) => {
+                self.status = format!("Could not read Minecraft process: {error}");
+                self.game_process = None;
+            }
+            None => {}
         }
         if self.install_rx.is_some() || self.game_process.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
