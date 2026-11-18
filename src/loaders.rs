@@ -94,7 +94,12 @@ fn generated_profile(mc: &str, root: &Path, instance: &Path, loader: &str) -> Re
         let id = entry.file_name().to_string_lossy().into_owned();
         if !id.to_lowercase().contains(loader) { continue; }
         let path = entry.path().join(format!("{id}.json"));
-        if let Ok(bytes) = fs::read(path) { if let Ok(value) = serde_json::from_slice::<Value>(&bytes) { if value.get("inheritsFrom").and_then(Value::as_str) == Some(mc) { profiles.push(value); } } }
+        if let Ok(bytes) = fs::read(path)
+            && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+            && value.get("inheritsFrom").and_then(Value::as_str) == Some(mc)
+        {
+            profiles.push(value);
+        }
     }
     let profile = profiles.into_iter().next().context("Loader installer did not create a compatible profile")?;
     let base = launcher::load_installed(mc, root)?;

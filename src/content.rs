@@ -76,7 +76,9 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The resource-pack version contains no files")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
-        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Resource-pack checksum verification failed"); }
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+    {
+        bail!("Resource-pack checksum verification failed");
     }
     let directory = root.join("resourcepacks");
     fs::create_dir_all(&directory)?;
@@ -119,8 +121,8 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         if destination.exists() { continue; }
         let mut downloaded = None;
         for url in &item.downloads {
-            if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status) {
-                if let Ok(bytes) = response.bytes() {
+            if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status)
+                && let Ok(bytes) = response.bytes() {
                     let valid = item.hashes.get("sha1").is_none_or(|expected| format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected));
                     if valid { downloaded = Some(bytes); break; }
                 }
@@ -149,7 +151,9 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The modpack version contains no file")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
-        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Modpack checksum verification failed"); }
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+    {
+        bail!("Modpack checksum verification failed");
     }
     install_modpack_bytes(&bytes, root)
 }
@@ -207,8 +211,10 @@ pub fn install_mod(project_id: &str, root: &Path, minecraft: &str, loader: &str)
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
         .context("Mod version contains no downloadable file")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1")) {
-        if !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Mod checksum verification failed"); }
+    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+    {
+        bail!("Mod checksum verification failed");
     }
     let directory = root.join("mods");
     fs::create_dir_all(&directory)?;
