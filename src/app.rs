@@ -443,8 +443,10 @@ impl LunarApp {
                         ui.label(RichText::new(&profile.uuid).size(10.0).color(Color32::GRAY).monospace());
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Delete").clicked() {
-                            if let Err(error) = self.profiles.delete(&profile.name) { self.status = error.to_string(); }
+                        if ui.button("Delete").clicked()
+                            && let Err(error) = self.profiles.delete(&profile.name)
+                        {
+                            self.status = error.to_string();
                         }
                         if ui.button("Rename").clicked() {
                             self.rename_target = Some(profile.name.clone());
