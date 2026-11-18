@@ -107,6 +107,28 @@ fn download(client: &reqwest::blocking::Client, url: &str, destination: &Path, e
     Ok(())
 }
 
+
+fn maven_artifact_path(coordinate: &str, classifier: Option<&str>) -> Option<String> {
+    let (coordinate, extension) = coordinate.split_once('@').unwrap_or((coordinate, "jar"));
+    let mut parts = coordinate.split(':');
+    let group = parts.next()?;
+    let artifact = parts.next()?;
+    let version = parts.next()?;
+    let embedded_classifier = parts.next();
+    let classifier = classifier.or(embedded_classifier);
+    let suffix = classifier.map(|value| format!("-{value}")).unwrap_or_default();
+    Some(format!(
+        "{}/{}/{}/{}-{}{}.{}",
+        group.replace('.', "/"),
+        artifact,
+        version,
+        artifact,
+        version,
+        suffix,
+        extension
+    ))
+}
+
 fn current_os() -> &'static str {
     if cfg!(target_os = "windows") {
         "windows"
@@ -203,6 +225,7 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
             continue;
         }
         let downloads = library.get("downloads").cloned().unwrap_or_else(|| json!({}));
+        let base_url = library.get("url").and_then(Value::as_str).unwrap_or("https://libraries.minecraft.net/");
         if let Some(artifact) = downloads.get("artifact") {
             if let (Some(url), Some(relative)) = (
                 artifact.get("url").and_then(Value::as_str),
@@ -212,25 +235,49 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
                 download(&http, url, &path, artifact.get("sha1").and_then(Value::as_str))?;
                 libraries.push(path);
             }
+        } else if let Some(coordinate) = library.get("name").and_then(Value::as_str) {
+            if let Some(relative) = maven_artifact_path(coordinate, None) {
+                let path = libraries_root.join(&relative);
+                let url = format!("{}/{}", base_url.trim_end_matches('/'), relative);
+                download(&http, &url, &path, None)?;
+                libraries.push(path);
+            }
         }
         let native_key = library.get("natives")
             .and_then(|natives| natives.get(current_os()))
             .and_then(Value::as_str)
             .map(|value| value.replace("${arch}", if cfg!(target_arch = "x86_64") { "64" } else { "32" }));
         if let Some(native_key) = native_key {
-            if let Some(native) = downloads.pointer(&format!("/classifiers/{}", native_key)) {
+            let modern_native = downloads.pointer(&format!("/classifiers/{}", native_key));
+            let native_file = if let Some(native) = modern_native {
                 if let (Some(url), Some(relative)) = (
                     native.get("url").and_then(Value::as_str),
                     native.get("path").and_then(Value::as_str),
                 ) {
                     let path = libraries_root.join(relative);
                     download(&http, url, &path, native.get("sha1").and_then(Value::as_str))?;
-                    let excludes = library.pointer("/extract/exclude")
-                        .and_then(Value::as_array)
-                        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    safe_extract_natives(&path, &natives, &excludes)?;
+                    Some(path)
+                } else {
+                    None
                 }
+            } else if let Some(coordinate) = library.get("name").and_then(Value::as_str) {
+                if let Some(relative) = maven_artifact_path(coordinate, Some(&native_key)) {
+                    let path = libraries_root.join(&relative);
+                    let url = format!("{}/{}", base_url.trim_end_matches('/'), relative);
+                    download(&http, &url, &path, None)?;
+                    Some(path)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(path) = native_file {
+                let excludes = library.pointer("/extract/exclude")
+                    .and_then(Value::as_array)
+                    .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                safe_extract_natives(&path, &natives, &excludes)?;
             }
         }
         progress(InstallProgress { phase: "Libraries".into(), completed, total });
