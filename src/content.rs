@@ -242,3 +242,50 @@ pub fn remove_modpack(pack: &InstalledPack, root: &Path) -> Result<()> {
     fs::remove_dir_all(target)?;
     Ok(())
 }
+
+fn option_list(root: &Path, key: &str) -> Vec<String> {
+    let text = fs::read_to_string(root.join("options.txt")).unwrap_or_default();
+    text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name != key { return None; }
+        serde_json::from_str::<Vec<String>>(value).ok()
+    }).unwrap_or_default()
+}
+
+pub fn resource_pack_enabled(root: &Path, filename: &str) -> bool {
+    option_list(root, "resourcePacks").contains(&format!("file/{filename}"))
+}
+
+pub fn set_resource_pack_enabled(root: &Path, filename: &str, enabled: bool) -> Result<()> {
+    fs::create_dir_all(root)?;
+    let path = root.join("options.txt");
+    let source = fs::read_to_string(&path).unwrap_or_default();
+    let token = format!("file/{filename}");
+    let mut active = option_list(root, "resourcePacks");
+    let mut inactive = option_list(root, "incompatibleResourcePacks");
+    active.retain(|value| value != &token);
+    inactive.retain(|value| value != &token);
+    if enabled { active.push(token); } else { inactive.push(token); }
+    let mut output = Vec::new();
+    let mut active_written = false;
+    let mut inactive_written = false;
+    for line in source.lines() {
+        if let Some((key, _)) = line.split_once(':') {
+            if key == "resourcePacks" {
+                output.push(format!("resourcePacks:{}", serde_json::to_string(&active)?));
+                active_written = true;
+                continue;
+            }
+            if key == "incompatibleResourcePacks" {
+                output.push(format!("incompatibleResourcePacks:{}", serde_json::to_string(&inactive)?));
+                inactive_written = true;
+                continue;
+            }
+        }
+        output.push(line.to_owned());
+    }
+    if !active_written { output.push(format!("resourcePacks:{}", serde_json::to_string(&active)?)); }
+    if !inactive_written { output.push(format!("incompatibleResourcePacks:{}", serde_json::to_string(&inactive)?)); }
+    fs::write(path, output.join("\n"))?;
+    Ok(())
+}

@@ -677,6 +677,41 @@ impl LunarApp {
                 });
             });
         }
+        ui.add_space(8.0);
+        ui.label(RichText::new("RESOURCE PACKS").strong().size(11.0).color(self.accent));
+        for file in crate::content::list_files(&self.game_root, "resourcepacks").unwrap_or_default() {
+            if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
+                ui.horizontal(|ui| {
+                    let mut enabled = crate::content::resource_pack_enabled(&self.game_root, filename);
+                    if ui.checkbox(&mut enabled, filename).changed() {
+                        match crate::content::set_resource_pack_enabled(&self.game_root, filename, enabled) {
+                            Ok(()) => self.status = format!("Updated {filename}; restart Minecraft to apply"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                    if ui.small_button("Remove").clicked() {
+                        match crate::content::remove_file(&file, &self.game_root, "resourcepacks") {
+                            Ok(()) => self.status = format!("Removed {filename}"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                });
+            }
+        }
+        ui.label(RichText::new("INSTALLED MODS").strong().size(11.0).color(self.accent));
+        for file in crate::content::list_files(&self.game_root, "mods").unwrap_or_default() {
+            if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
+                ui.horizontal(|ui| {
+                    ui.label(filename);
+                    if ui.small_button("Remove").clicked() {
+                        match crate::content::remove_file(&file, &self.game_root, "mods") {
+                            Ok(()) => self.status = format!("Removed {filename}"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                });
+            }
+        }
         ui.horizontal(|ui| {
             for (label, folder) in [("Open resource packs", "resourcepacks"), ("Open mods", "mods")] {
                 if ui.button(label).clicked() {
