@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, VecDeque},
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -243,19 +243,7 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     )?;
     let asset_index: Value = serde_json::from_slice(&fs::read(&asset_index_path)?)?;
     let objects = asset_index.get("objects").and_then(Value::as_object).context("Asset index objects missing")?;
-    let total_assets = objects.len();
-    for (index, object) in objects.values().enumerate() {
-        let hash = object.get("hash").and_then(Value::as_str).context("Asset hash missing")?;
-        if hash.len() < 2 {
-            bail!("Invalid asset hash");
-        }
-        let path = root.join("assets").join("objects").join(&hash[..2]).join(hash);
-        let url = format!("https://resources.download.minecraft.net/{}/{}", &hash[..2], hash);
-        download(&http, &url, &path, Some(hash))?;
-        if index % 50 == 0 || index + 1 == total_assets {
-            progress(InstallProgress { phase: "Assets".into(), completed: index + 1, total: total_assets });
-        }
-    }
+    download_assets(&http, root, objects, &mut progress)?;
 
     libraries.push(client_jar.clone());
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
