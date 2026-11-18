@@ -140,6 +140,10 @@ impl LunarApp {
         }
         let version = self.selected_version.clone();
         let root = self.game_root.clone();
+        self.installed_ids.remove(&version);
+        if self.installed_version.as_ref().is_some_and(|installed| installed.id == version) {
+            self.installed_version = None;
+        }
         let (result_tx, result_rx) = mpsc::channel();
         let (progress_tx, progress_rx) = mpsc::channel();
         self.install_rx = Some(result_rx);
