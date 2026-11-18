@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{io::{Read, Write}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::OnceLock, time::{Duration, Instant}};
+use std::{io::{Read, Write}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, time::{Duration, Instant}};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedServer {

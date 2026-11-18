@@ -763,7 +763,7 @@ impl LunarApp {
                 let (tx, rx) = mpsc::channel();
                 self.server_rx = Some(rx);
                 std::thread::spawn(move || {
-                    let results = servers.iter().map(|server| (server.address.clone(), crate::server::ping(server))).collect();
+                    let results = servers.iter().map(|server| (server.address.clone(), crate::server::ping(server).map_err(|error| error.to_string()))).collect();
                     let _ = tx.send(results);
                 });
             }
@@ -794,7 +794,7 @@ impl LunarApp {
                             let address = server.address.clone();
                             let (tx, rx) = mpsc::channel();
                             self.server_rx = Some(rx);
-                            std::thread::spawn(move || { let _ = tx.send(vec![(address, crate::server::ping(&server))]); });
+                            std::thread::spawn(move || { let _ = tx.send(vec![(address, crate::server::ping(&server).map_err(|error| error.to_string()))]); });
                         }
                     });
                 });
