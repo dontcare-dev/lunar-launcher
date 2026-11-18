@@ -36,10 +36,22 @@ impl LauncherPreferences {
             if let Ok(bytes) = serde_json::to_vec_pretty(self) {
                 let temporary = path.with_extension("tmp");
                 if fs::write(&temporary, bytes).is_ok() {
-                    if path.exists() {
-                        let _ = fs::remove_file(&path);
+                    let backup = path.with_extension("bak");
+                    let had_previous = path.exists();
+                    if had_previous {
+                        let _ = fs::remove_file(&backup);
+                        if fs::rename(&path, &backup).is_err() {
+                            let _ = fs::remove_file(&temporary);
+                            return;
+                        }
                     }
-                    let _ = fs::rename(temporary, path);
+                    if fs::rename(&temporary, &path).is_ok() {
+                        if had_previous {
+                            let _ = fs::remove_file(backup);
+                        }
+                    } else if had_previous {
+                        let _ = fs::rename(backup, &path);
+                    }
                 }
             }
         }
