@@ -581,7 +581,7 @@ impl LunarApp {
     }
 
 
-\n
+
 
     fn content(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Content", "Install and manage Minecraft content without manual file handling.");

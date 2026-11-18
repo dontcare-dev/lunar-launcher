@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use std::{fs, io::{Cursor, Read}, path::{Path, PathBuf}, process::Command};
+use std::{fs, io::Cursor, path::{Path, PathBuf}, process::Command};
 use zip::ZipArchive;
 
 fn platform() -> (&'static str, &'static str) {

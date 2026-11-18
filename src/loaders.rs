@@ -78,7 +78,8 @@ fn run_installer(url: &str, root: &Path) -> Result<()> {
     fs::create_dir_all(&directory)?;
     let installer = directory.join(format!("loader-{}.jar", std::process::id()));
     fs::write(&installer, bytes)?;
-    let java = if cfg!(target_os = "windows") { "java.exe" } else { "java" };
+    let mut java = crate::runtime::find_java(17, root).unwrap_or_else(|| PathBuf::from(if cfg!(target_os = "windows") { "java.exe" } else { "java" }));
+    if crate::runtime::version(&java).is_err() { java = crate::runtime::install_java(17, root)?; }
     let output = Command::new(java).arg("-jar").arg(&installer).arg("--installClient").arg("--installDir").arg(root).output().context("Java is required to run the loader installer")?;
     let _ = fs::remove_file(installer);
     if !output.status.success() { bail!("Loader installer failed: {}", String::from_utf8_lossy(&output.stderr)); }
