@@ -131,7 +131,7 @@ fn rules_allow(value: &Value) -> bool {
                 else if cfg!(target_arch = "aarch64") { arch == "aarch64" || arch == "arm64" }
                 else { true }
             });
-        let feature_matches = rule.get("features").is_none();
+        let feature_matches = rule.get("features").and_then(Value::as_object).is_none_or(|features| features.values().all(|value| value.as_bool() == Some(false)));
         if os_matches && arch_matches && feature_matches {
             allowed = rule.get("action").and_then(Value::as_str) == Some("allow");
         }
@@ -333,7 +333,7 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
         .unwrap_or_default();
     if game.is_empty() {
         if let Some(legacy) = installed.metadata.get("minecraftArguments").and_then(Value::as_str) {
-            game = legacy.split_whitespace().map(str::to_owned).collect();
+            game = shlex::split(legacy).unwrap_or_else(|| legacy.split_whitespace().map(str::to_owned).collect());
         }
     }
     let substitutions = [
@@ -357,6 +357,10 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     replace_arguments(&mut jvm, &substitutions);
     replace_arguments(&mut game, &substitutions);
     let mut command = Command::new(java);
+    let logs = game_dir.join("logs");
+    fs::create_dir_all(&logs)?;
+    let log = OpenOptions::new().create(true).append(true).open(logs.join("lunar-game.log"))?;
+    let log = Arc::new(Mutex::new(log));
     command.current_dir(game_dir)
         .arg(format!("-Xmx{}M", memory_mb.max(512)))
         .args(jvm)
@@ -364,7 +368,33 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
         .args(game)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    command.spawn().context("Could not start Minecraft. Check that a compatible Java runtime is installed.")
+    let mut child = command.spawn().context("Could not start Minecraft. Check that a compatible Java runtime is installed.")?;
+    if let Some(stdout) = child.stdout.take() {
+        let log = Arc::clone(&log);
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                if let Ok(mut file) = log.lock() {
+                    let _ = file.write_all(line.as_bytes());
+                }
+                line.clear();
+            }
+        });
+    }
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                if let Ok(mut file) = log.lock() {
+                    let _ = file.write_all(line.as_bytes());
+                }
+                line.clear();
+            }
+        });
+    }
+    Ok(child)
 }
 
 pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion> {
