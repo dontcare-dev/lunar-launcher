@@ -1,4 +1,4 @@
-mod app;
+mod app;\nmod content;
 mod minecraft;
 mod launcher;
 mod profiles;
