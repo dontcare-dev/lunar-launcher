@@ -25,6 +25,7 @@ pub struct InstalledVersion {
     pub directory: PathBuf,
     pub main_class: String,
     pub assets: String,
+    pub game_assets: PathBuf,
     pub libraries: Vec<PathBuf>,
     pub natives: PathBuf,
     pub metadata: Value,
@@ -323,6 +324,9 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
 
     let libraries_root = root.join("libraries");
     let natives = root.join("versions").join(version_id).join("natives");
+    if natives.exists() {
+        fs::remove_dir_all(&natives)?;
+    }
     fs::create_dir_all(&natives)?;
     let mut libraries = Vec::new();
     let entries = metadata.get("libraries").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -417,12 +421,20 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
 
     libraries.push(client_jar.clone());
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
+    let game_assets = if asset_index.get("virtual").and_then(Value::as_bool).unwrap_or(false) {
+        root.join("assets").join("virtual").join(asset_index_id)
+    } else if asset_index.get("map_to_resources").and_then(Value::as_bool).unwrap_or(false) {
+        root.join("resources")
+    } else {
+        root.join("assets")
+    };
     fs::write(directory.join(".lunar-installed"), version_id.as_bytes())?;
     Ok(InstalledVersion {
         id: version_id.to_owned(),
         directory,
         main_class,
         assets: metadata.get("assets").and_then(Value::as_str).unwrap_or(asset_index_id).to_owned(),
+        game_assets,
         libraries,
         natives,
         metadata,
@@ -520,12 +532,12 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
         ("${game_directory}", game_dir.to_string_lossy().into_owned()),
         ("${assets_root}", assets_dir.to_string_lossy().into_owned()),
         ("${assets_index_name}", installed.assets.clone()),
-        ("${game_assets}", assets_dir.to_string_lossy().into_owned()),
+        ("${game_assets}", installed.game_assets.to_string_lossy().into_owned()),
         ("${path}", installed.metadata.pointer("/logging/client/file/id").and_then(Value::as_str).map(|id| assets_dir.join("log_configs").join(id).to_string_lossy().into_owned()).unwrap_or_default()),
         ("${auth_uuid}", uuid.to_owned()),
         ("${auth_access_token}", "0".into()),
         ("${user_type}", "legacy".into()),
-        ("${version_type}", "release".into()),
+        ("${version_type}", installed.metadata.get("type").and_then(Value::as_str).unwrap_or("release").to_owned()),
         ("${clientid}", String::new()),
         ("${auth_xuid}", String::new()),
         ("${user_properties}", "{}".into()),
@@ -611,6 +623,13 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
         main_class,
         assets: metadata.get("assets").and_then(Value::as_str).unwrap_or(asset_index_id).to_owned(),
         libraries,
+        game_assets: if metadata.pointer("/assetIndex/virtual").and_then(Value::as_bool).unwrap_or(false) {
+            root.join("assets").join("virtual").join(asset_index_id)
+        } else if metadata.pointer("/assetIndex/map_to_resources").and_then(Value::as_bool).unwrap_or(false) {
+            root.join("resources")
+        } else {
+            root.join("assets")
+        },
         natives: directory.join("natives"),
         metadata,
     })
