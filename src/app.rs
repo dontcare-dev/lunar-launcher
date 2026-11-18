@@ -307,12 +307,11 @@ impl LunarApp {
                         ui.selectable_value(&mut self.profiles.selected, Some(profile.name.clone()), &profile.name);
                     }
                 });
-            if previous_profile != self.profiles.selected {
-                if let Some(name) = self.profiles.selected.clone() {
-                    if let Err(error) = self.profiles.select(&name) {
-                        self.status = error.to_string();
-                    }
-                }
+            if previous_profile != self.profiles.selected
+                && let Some(name) = self.profiles.selected.clone()
+                && let Err(error) = self.profiles.select(&name)
+            {
+                self.status = error.to_string();
             }
             if ui.button("Manage profiles").clicked() { self.screen = Screen::Profiles; }
         });
