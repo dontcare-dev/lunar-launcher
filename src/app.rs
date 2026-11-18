@@ -774,7 +774,7 @@ impl eframe::App for LunarApp {
                     Screen::Play => self.play(ui),
                     Screen::Versions => self.versions(ui),
                     Screen::Profiles => self.profiles(ui),
-                    Screen::Content => self.content(ui),\n                    Screen::Content => self.content(ui),
+                    Screen::Content => self.content(ui)
                     Screen::Settings => self.settings(ui),
                 }
             });
