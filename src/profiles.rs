@@ -108,7 +108,6 @@ impl ProfileStore {
             .find(|item| item.name == old_name)
             .context("Profile not found")?;
         profile.name = replacement.name.clone();
-        profile.uuid = replacement.uuid;
         if self.selected.as_deref() == Some(old_name) {
             self.selected = Some(replacement.name);
         }
