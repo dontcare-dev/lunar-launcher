@@ -186,6 +186,7 @@ impl LunarApp {
         ui.group(|ui| {
             ui.label(RichText::new("PLAYER").size(10.0).color(Color32::GRAY).strong());
             ui.add_space(6.0);
+            let previous_profile = self.profiles.selected.clone();
             egui::ComboBox::from_id_salt("play_profile")
                 .selected_text(self.profiles.selected.as_deref().unwrap_or("Select offline profile"))
                 .show_ui(ui, |ui| {
@@ -193,6 +194,13 @@ impl LunarApp {
                         ui.selectable_value(&mut self.profiles.selected, Some(profile.name.clone()), &profile.name);
                     }
                 });
+            if previous_profile != self.profiles.selected {
+                if let Some(name) = self.profiles.selected.clone() {
+                    if let Err(error) = self.profiles.select(&name) {
+                        self.status = error.to_string();
+                    }
+                }
+            }
             if ui.button("Manage profiles").clicked() { self.screen = Screen::Profiles; }
         });
         ui.add_space(12.0);
