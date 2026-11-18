@@ -203,6 +203,102 @@ fn safe_extract_natives(archive: &Path, destination: &Path, excludes: &[String])
     Ok(())
 }
 
+
+fn materialize_legacy_assets(root: &Path, asset_index: &Value, objects: &serde_json::Map<String, Value>, index_id: &str) -> Result<()> {
+    let virtual_assets = asset_index.get("virtual").and_then(Value::as_bool).unwrap_or(false);
+    let map_resources = asset_index.get("map_to_resources").and_then(Value::as_bool).unwrap_or(false);
+    if !virtual_assets && !map_resources {
+        return Ok(());
+    }
+    for (name, object) in objects {
+        let hash = object.get("hash").and_then(Value::as_str).context("Asset hash missing")?;
+        let relative = Path::new(name);
+        if relative.components().any(|component| !matches!(component, std::path::Component::Normal(_))) {
+            continue;
+        }
+        let source = root.join("assets").join("objects").join(&hash[..2]).join(hash);
+        let destination = if virtual_assets {
+            root.join("assets").join("virtual").join(index_id).join(relative)
+        } else {
+            root.join("resources").join(relative)
+        };
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if destination.exists() {
+            continue;
+        }
+        if fs::hard_link(&source, &destination).is_err() {
+            fs::copy(&source, &destination)?;
+        }
+    }
+    Ok(())
+}
+
+fn download_assets(
+    http: &reqwest::blocking::Client,
+    root: &Path,
+    objects: &serde_json::Map<String, Value>,
+    mut progress: impl FnMut(InstallProgress),
+) -> Result<()> {
+    let tasks = objects.values().map(|object| {
+        let hash = object.get("hash").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let prefix = hash.get(..2).unwrap_or_default();
+        let path = root.join("assets").join("objects").join(prefix).join(&hash);
+        let url = format!("https://resources.download.minecraft.net/{prefix}/{hash}");
+        (url, path, hash)
+    }).collect::<Vec<_>>();
+    if tasks.iter().any(|(_, _, hash)| hash.len() < 2 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+        bail!("Asset index contains an invalid SHA-1 hash");
+    }
+    let total = tasks.len();
+    let queue = Arc::new(Mutex::new(VecDeque::from(tasks)));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let failure = Arc::new(Mutex::new(None::<String>));
+    let workers = total.clamp(1, 8);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let queue = Arc::clone(&queue);
+            let completed = Arc::clone(&completed);
+            let failure = Arc::clone(&failure);
+            let http = http.clone();
+            scope.spawn(move || loop {
+                if failure.lock().is_ok_and(|error| error.is_some()) {
+                    break;
+                }
+                let task = queue.lock().ok().and_then(|mut queue| queue.pop_front());
+                let Some((url, path, hash)) = task else { break };
+                if let Err(error) = download(&http, &url, &path, Some(&hash)) {
+                    if let Ok(mut slot) = failure.lock() {
+                        if slot.is_none() {
+                            *slot = Some(format!("{error:#}"));
+                        }
+                    }
+                    break;
+                }
+                completed.fetch_add(1, Ordering::Relaxed);
+            });
+        }
+        let mut last_reported = 0;
+        loop {
+            let count = completed.load(Ordering::Relaxed);
+            if count >= total || failure.lock().is_ok_and(|error| error.is_some()) {
+                break;
+            }
+            if count >= last_reported + 25 {
+                progress(InstallProgress { phase: "Assets".into(), completed: count, total });
+                last_reported = count;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+    if let Some(error) = failure.lock().map_err(|_| anyhow!("Asset worker failed"))?.take() {
+        bail!("Asset download failed: {error}");
+    }
+    progress(InstallProgress { phase: "Assets".into(), completed: total, total });
+    Ok(())
+}
+
 pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallProgress)) -> Result<InstalledVersion> {
     let http = client()?;
     let manifest = fetch_json(&http, MANIFEST_URL)?;
