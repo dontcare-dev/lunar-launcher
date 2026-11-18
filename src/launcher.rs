@@ -367,6 +367,47 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     command.spawn().context("Could not start Minecraft. Check that a compatible Java runtime is installed.")
 }
 
+pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion> {
+    let directory = root.join("versions").join(version_id);
+    let metadata_path = directory.join(format!("{version_id}.json"));
+    let metadata: Value = serde_json::from_slice(&fs::read(&metadata_path)
+        .with_context(|| format!("Version {version_id} is not installed"))?)?;
+    let client_jar = directory.join(format!("{version_id}.jar"));
+    if !client_jar.exists() {
+        bail!("Minecraft client JAR is missing for {version_id}");
+    }
+    let mut libraries = Vec::new();
+    let libraries_root = root.join("libraries");
+    if let Some(entries) = metadata.get("libraries").and_then(Value::as_array) {
+        for library in entries {
+            if !rules_allow(library) {
+                continue;
+            }
+            if let Some(relative) = library.pointer("/downloads/artifact/path").and_then(Value::as_str) {
+                let path = libraries_root.join(relative);
+                if path.exists() {
+                    libraries.push(path);
+                }
+            }
+        }
+    }
+    libraries.push(client_jar.clone());
+    let asset_index_id = metadata.pointer("/assetIndex/id").and_then(Value::as_str).context("Asset index ID missing")?;
+    let asset_index = root.join("assets").join("indexes").join(format!("{asset_index_id}.json"));
+    let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
+    Ok(InstalledVersion {
+        id: version_id.to_owned(),
+        directory: directory.clone(),
+        main_class,
+        assets: metadata.get("assets").and_then(Value::as_str).unwrap_or(asset_index_id).to_owned(),
+        asset_index,
+        client_jar,
+        libraries,
+        natives: directory.join("natives"),
+        metadata,
+    })
+}
+
 pub fn installed_versions(root: &Path) -> Result<BTreeSet<String>> {
     let mut versions = BTreeSet::new();
     let path = root.join("versions");
