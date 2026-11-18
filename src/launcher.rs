@@ -313,6 +313,7 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
 
     libraries.push(client_jar.clone());
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
+    fs::write(directory.join(".lunar-installed"), version_id.as_bytes())?;
     Ok(InstalledVersion {
         id: version_id.to_owned(),
         directory,
@@ -515,7 +516,7 @@ pub fn installed_versions(root: &Path) -> Result<BTreeSet<String>> {
         let entry = entry?;
         if entry.file_type()?.is_dir() {
             let id = entry.file_name().to_string_lossy().into_owned();
-            if entry.path().join(format!("{id}.jar")).exists() {
+            if entry.path().join(".lunar-installed").exists() && entry.path().join(format!("{id}.jar")).exists() {
                 versions.insert(id);
             }
         }
