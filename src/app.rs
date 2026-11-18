@@ -76,6 +76,7 @@ pub struct LunarApp {
     manifest: Option<VersionManifest>,
     version_rx: Option<Receiver<Result<VersionManifest, String>>>,
     selected_version: String,
+    version_filter: String,
     snapshots: bool,
     status: String,
     accent: Color32,
@@ -116,6 +117,7 @@ impl LunarApp {
             manifest: None,
             version_rx: None,
             selected_version: String::new(),
+            version_filter: String::new(),
             snapshots: preferences.snapshots,
             status: "Ready".into(),
             accent: Color32::from_rgb(137, 169, 232),
@@ -448,6 +450,7 @@ impl LunarApp {
     fn versions(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Versions", "Official Minecraft Java Edition release metadata.");
         ui.horizontal(|ui| {
+            ui.add_sized([260.0, 30.0], egui::TextEdit::singleline(&mut self.version_filter).hint_text("Search every version"));
             if ui.button("Refresh manifest").clicked() { self.refresh_versions(); }
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
@@ -459,8 +462,8 @@ impl LunarApp {
             ui.label(format!("Latest release: {}   ·   Latest snapshot: {}", manifest.latest.release, manifest.latest.snapshot));
             egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
                 let versions: Vec<VersionEntry> = manifest.versions.iter()
-                    .filter(|entry| entry.kind == "release" || (self.snapshots && entry.kind == "snapshot"))
-                    .take(100)
+                    .filter(|entry| entry.kind == "release" || self.snapshots)
+                    .filter(|entry| self.version_filter.is_empty() || entry.id.to_lowercase().contains(&self.version_filter.to_lowercase()))
                     .cloned().collect();
                 for version in versions {
                     ui.horizontal(|ui| {
