@@ -620,6 +620,16 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
     }
     libraries.push(client_jar.clone());
     let asset_index_id = metadata.pointer("/assetIndex/id").and_then(Value::as_str).context("Asset index ID missing")?;
+    let asset_index_path = root.join("assets").join("indexes").join(format!("{asset_index_id}.json"));
+    let asset_index: Value = serde_json::from_slice(&fs::read(&asset_index_path)
+        .with_context(|| format!("Asset index {asset_index_id} is missing"))?)?;
+    let game_assets = if asset_index.get("virtual").and_then(Value::as_bool).unwrap_or(false) {
+        root.join("assets").join("virtual").join(asset_index_id)
+    } else if asset_index.get("map_to_resources").and_then(Value::as_bool).unwrap_or(false) {
+        root.join("resources")
+    } else {
+        root.join("assets")
+    };
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
     Ok(InstalledVersion {
         id: version_id.to_owned(),
@@ -627,13 +637,7 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
         main_class,
         assets: metadata.get("assets").and_then(Value::as_str).unwrap_or(asset_index_id).to_owned(),
         libraries,
-        game_assets: if metadata.pointer("/assetIndex/virtual").and_then(Value::as_bool).unwrap_or(false) {
-            root.join("assets").join("virtual").join(asset_index_id)
-        } else if metadata.pointer("/assetIndex/map_to_resources").and_then(Value::as_bool).unwrap_or(false) {
-            root.join("resources")
-        } else {
-            root.join("assets")
-        },
+        game_assets,
         natives: directory.join("natives"),
         metadata,
     })
