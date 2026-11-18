@@ -243,7 +243,7 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     )?;
     let asset_index: Value = serde_json::from_slice(&fs::read(&asset_index_path)?)?;
     let objects = asset_index.get("objects").and_then(Value::as_object).context("Asset index objects missing")?;
-    download_assets(&http, root, objects, &mut progress)?;
+    download_assets(&http, root, objects, &mut progress)?;\n    materialize_legacy_assets(root, &asset_index, objects, asset_index_id)?;
 
     libraries.push(client_jar.clone());
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
