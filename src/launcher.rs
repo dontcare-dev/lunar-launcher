@@ -63,7 +63,7 @@ fn digest(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn download(client: &reqwest::blocking::Client, url: &str, destination: &Path, expected: Option<&str>) -> Result<()> {
+fn download_once(client: &reqwest::blocking::Client, url: &str, destination: &Path, expected: Option<&str>) -> Result<()> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -125,6 +125,22 @@ fn maven_artifact_path(coordinate: &str, classifier: Option<&str>) -> Option<Str
         suffix,
         extension
     ))
+}
+
+fn download(client: &reqwest::blocking::Client, url: &str, destination: &Path, expected: Option<&str>) -> Result<()> {
+    let mut last_error = None;
+    for attempt in 0..3 {
+        match download_once(client, url, destination, expected) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_secs(attempt + 1));
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow!("Download failed for {url}")))
 }
 
 fn current_os() -> &'static str {
