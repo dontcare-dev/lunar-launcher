@@ -2,6 +2,7 @@ mod app;
 mod content;
 mod loaders;
 mod runtime;
+mod server;
 mod minecraft;
 mod launcher;
 mod profiles;

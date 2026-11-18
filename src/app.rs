@@ -66,6 +66,7 @@ enum Screen {
     Profiles,
     Settings,
     Content,
+    Servers,
 }
 
 pub struct LunarApp {
@@ -100,6 +101,11 @@ pub struct LunarApp {
     content_loader: String,
     installed_packs: Vec<crate::content::InstalledPack>,
     modpack_launch_rx: Option<Receiver<Result<InstalledVersion, String>>>,
+    servers: Vec<crate::server::SavedServer>,
+    server_name: String,
+    server_address: String,
+    server_statuses: std::collections::BTreeMap<String, crate::server::ServerStatus>,
+    server_rx: Option<Receiver<Vec<(String, Result<crate::server::ServerStatus, String>)>>>,
 }
 
 impl LunarApp {
@@ -151,6 +157,11 @@ impl LunarApp {
             content_loader: "fabric".into(),
             installed_packs: crate::content::installed_modpacks(&game_root).unwrap_or_default(),
             modpack_launch_rx: None,
+            servers: crate::server::load(),
+            server_name: String::new(),
+            server_address: String::new(),
+            server_statuses: std::collections::BTreeMap::new(),
+            server_rx: None,
         };
         app.refresh_versions();
         app
@@ -339,6 +350,7 @@ impl LunarApp {
                     ("Versions", Screen::Versions),
                     ("Profiles", Screen::Profiles),
                     ("Content", Screen::Content),
+                    ("Servers", Screen::Servers),
                     ("Settings", Screen::Settings),
                 ] {
                     if Self::nav_button(ui, label, self.screen == screen).clicked() {
@@ -727,6 +739,70 @@ impl LunarApp {
         if self.content_busy || self.modpack_launch_rx.is_some() { ui.spinner(); }
     }
 
+    fn servers(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Server browser", "Save servers and check their live Java Edition status.");
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(RichText::new("ADD SERVER").strong().size(11.0).color(self.accent));
+            ui.horizontal(|ui| {
+                ui.add_sized([180.0, 32.0], egui::TextEdit::singleline(&mut self.server_name).hint_text("Server name"));
+                ui.add_sized([220.0, 32.0], egui::TextEdit::singleline(&mut self.server_address).hint_text("Address or host:port"));
+                if ui.add_enabled(!self.server_name.trim().is_empty() && !self.server_address.trim().is_empty(), egui::Button::new("Add server")).clicked() {
+                    let server = crate::server::SavedServer { name: self.server_name.trim().to_owned(), address: self.server_address.trim().to_owned() };
+                    if !self.servers.iter().any(|saved| saved.address.eq_ignore_ascii_case(&server.address)) {
+                        self.servers.push(server);
+                        match crate::server::save(&self.servers) { Ok(()) => self.status = "Server saved".into(), Err(error) => self.status = error.to_string() }
+                    } else { self.status = "That server is already saved".into(); }
+                    self.server_name.clear();
+                    self.server_address.clear();
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!self.servers.is_empty() && self.server_rx.is_none(), egui::Button::new("Refresh all")).clicked() {
+                let servers = self.servers.clone();
+                let (tx, rx) = mpsc::channel();
+                self.server_rx = Some(rx);
+                std::thread::spawn(move || {
+                    let results = servers.iter().map(|server| (server.address.clone(), crate::server::ping(server))).collect();
+                    let _ = tx.send(results);
+                });
+            }
+            ui.label(RichText::new("Status checks use the Minecraft Java server protocol.").size(10.0).color(Color32::GRAY));
+        });
+        for server in self.servers.clone() {
+            ui.add_space(6.0);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&server.name).strong().size(15.0));
+                        ui.label(RichText::new(&server.address).size(11.0).color(Color32::GRAY));
+                        if let Some(status) = self.server_statuses.get(&server.address) {
+                            if status.online {
+                                ui.label(RichText::new(format!("{} · {} · {} ms", status.version, status.players, status.latency_ms)).size(11.0).color(Color32::from_rgb(112, 205, 151)));
+                                ui.label(RichText::new(&status.motd).size(11.0).color(Color32::GRAY));
+                            } else { ui.label(RichText::new("Offline or unreachable").size(11.0).color(Color32::from_rgb(220, 130, 130))); }
+                        } else { ui.label(RichText::new("Not checked").size(11.0).color(Color32::GRAY)); }
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Remove").clicked() {
+                            self.servers.retain(|saved| saved.address != server.address);
+                            self.server_statuses.remove(&server.address);
+                            if let Err(error) = crate::server::save(&self.servers) { self.status = error.to_string(); }
+                        }
+                        if ui.add_enabled(self.server_rx.is_none(), egui::Button::new("Ping")).clicked() {
+                            let server = server.clone();
+                            let address = server.address.clone();
+                            let (tx, rx) = mpsc::channel();
+                            self.server_rx = Some(rx);
+                            std::thread::spawn(move || { let _ = tx.send(vec![(address, crate::server::ping(&server))]); });
+                        }
+                    });
+                });
+            });
+        }
+        if self.server_rx.is_some() { ui.spinner(); }
+    }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Launcher preferences.");
         let previous_memory = self.memory_mb;
@@ -857,7 +933,7 @@ impl eframe::App for LunarApp {
                 Err(error) => self.status = error,
             }
         }
-        if self.content_search_rx.is_some()
+        if let Some(rx) = &self.server_rx\n            && let Ok(results) = rx.try_recv()\n        {\n            for (address, result) in results {\n                self.server_statuses.insert(address, result.unwrap_or_else(|_| crate::server::ServerStatus::default()));\n            }\n            self.server_rx = None;\n        }\n        if self.content_search_rx.is_some()
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
@@ -885,6 +961,7 @@ impl eframe::App for LunarApp {
                     Screen::Versions => self.versions(ui),
                     Screen::Profiles => self.profiles(ui),
                     Screen::Content => self.content(ui),
+                    Screen::Servers => self.servers(ui),
                     Screen::Settings => self.settings(ui),
                 }
             });
