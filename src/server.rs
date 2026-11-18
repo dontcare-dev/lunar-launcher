@@ -100,10 +100,10 @@ fn flatten_text(value: &Value) -> String {
 pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
     let (host, port) = if let Some(rest) = server.address.strip_prefix('[') {
         let (host, suffix) = rest.split_once(']').context("Invalid IPv6 server address")?;
-        let port = suffix.strip_prefix(':').map(str::parse).transpose()?.unwrap_or(25565);
+        let port: u16 = suffix.strip_prefix(':').map(str::parse).transpose()?.unwrap_or(25565);
         (host.to_owned(), port)
     } else if let Some((host, port)) = server.address.rsplit_once(':') {
-        if !host.contains(':') { (host.to_owned(), port.parse()?) } else { (server.address.clone(), 25565) }
+        if !host.contains(':') { (host.to_owned(), port.parse::<u16>()?) } else { (server.address.clone(), 25565) }
     } else { (server.address.clone(), 25565) };
     let address = format!("{host}:{port}");
     let socket = address.to_socket_addrs()?.next().context("Server address did not resolve")?;
