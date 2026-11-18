@@ -1,39 +1,44 @@
 # LUNAR
 
-LUNAR is a native Rust Minecraft launcher focused on offline profiles, reliable installation workflows, and a refined desktop experience.
+LUNAR is a native Rust Minecraft Java Edition launcher built around local offline profiles and a focused desktop interface.
 
-## Current implementation
+## Features
 
-- Native desktop shell built with egui/eframe
-- Persistent offline profile creation, selection, editing, and deletion
-- Minecraft Java Edition version manifest retrieval from Mojang's official metadata endpoint
-- Release and snapshot version filtering
-- Background network work so the interface remains responsive
-- Local application data stored in the operating system's application-data directory
-- Automated CI checks and release builds for Windows, Linux, and macOS
+- Native desktop UI with Home, Play, Versions, Profiles and Settings screens
+- Offline profile creation, selection, renaming, deletion and persistent storage
+- Mojang's official version manifest with release and snapshot selection
+- Downloads version metadata, the client JAR, libraries, native libraries and asset indexes
+- SHA-1 verification for downloaded game files
+- Parallel asset downloads with progress reporting
+- Native library extraction with path traversal protection
+- Java detection, memory allocation and process launching
+- Captured game output written to the launcher game log
+- Local game data stored in the operating system's application-data directory
 
-Offline profiles are local launcher identities. They do not authenticate with Mojang or Microsoft and do not grant access to online-mode servers or paid game entitlements.
+Offline profiles are local identities only. They do not authenticate with Mojang or Microsoft, bypass game ownership, or grant access to online-mode servers. Use a legitimate Minecraft installation and only servers that permit offline-mode connections.
 
-## Development
+## Build
 
-Install the stable Rust toolchain, then run:
+Install the stable Rust toolchain and the native graphics development packages required by eframe on your platform.
 
 ```sh
 cargo run
-cargo check
+cargo fmt --check
+cargo check --all-targets
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
-cargo fmt --check
 cargo build --release
 ```
 
-## Data
+## Game data
 
-LUNAR stores its own settings and offline profiles under the platform-specific application data directory. Minecraft game files are not bundled.
+LUNAR stores game versions, libraries, assets and logs inside its application-data directory under `minecraft`. The Play screen installs the selected official version before enabling launch. A compatible Java runtime must be installed and available on `PATH`.
 
-## Status
+Game output is appended to `minecraft/logs/lunar-game.log`.
 
-This repository is under active development. The current build establishes the native application foundation, offline profile persistence, and official version metadata integration. Full version installation, Java runtime management, game launching, mod loaders, and server diagnostics are subsequent implementation milestones.
+## Current scope
+
+The launcher currently targets vanilla Minecraft Java Edition. Fabric, Forge, NeoForge, modpack import, automatic Java runtime provisioning, Microsoft authentication, and server browsing are not included.
 
 ## Disclaimer
 
