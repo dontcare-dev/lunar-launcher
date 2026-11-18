@@ -304,7 +304,7 @@ impl LunarApp {
     }
 
     fn play(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Play", "Choose a local profile and Minecraft version.");
+        Self::heading(ui, "Play", "Choose an offline profile, select a version and launch.");
         ui.group(|ui| {
             ui.label(RichText::new("PLAYER").size(10.0).color(Color32::GRAY).strong());
             ui.add_space(6.0);
@@ -322,17 +322,53 @@ impl LunarApp {
             {
                 self.status = error.to_string();
             }
-            if ui.button("Manage profiles").clicked() { self.screen = Screen::Profiles; }
+            if ui.button("Manage profiles").clicked() {
+                self.screen = Screen::Profiles;
+            }
         });
         ui.add_space(12.0);
         ui.group(|ui| {
             ui.label(RichText::new("GAME VERSION").size(10.0).color(Color32::GRAY).strong());
             ui.add_space(6.0);
+            if let Some(manifest) = &self.manifest {
+                egui::ComboBox::from_id_salt("play_version")
+                    .selected_text(if self.selected_version.is_empty() { "Select Minecraft version" } else { &self.selected_version })
+                    .show_ui(ui, |ui| {
+                        for version in manifest.versions.iter().filter(|entry| entry.kind == "release" || self.snapshots) {
+                            ui.selectable_value(&mut self.selected_version, version.id.clone(), &version.id);
+                        }
+                    });
+            } else {
+                ui.label("Loading official version list…");
+            }
+            let installed = self.installed_ids.contains(&self.selected_version);
             ui.horizontal(|ui| {
-                ui.label(if self.selected_version.is_empty() { "No version loaded" } else { &self.selected_version });
-                if ui.button("Refresh").clicked() { self.refresh_versions(); }
+                if self.install_rx.is_some() {
+                    ui.add_enabled(false, egui::Button::new("Installing…"));
+                } else if installed {
+                    if ui.add_sized([150.0, 38.0], egui::Button::new(RichText::new("Launch Minecraft").strong()).fill(Color32::from_rgb(78, 111, 171))).clicked() {
+                        self.launch_selected();
+                    }
+                    if ui.button("Reinstall").clicked() {
+                        self.start_install();
+                    }
+                } else if ui.add_sized([150.0, 38.0], egui::Button::new(RichText::new("Install").strong()).fill(Color32::from_rgb(78, 111, 171))).clicked() {
+                    self.start_install();
+                }
+                if ui.button("Refresh versions").clicked() {
+                    self.refresh_versions();
+                }
             });
-            ui.label(RichText::new("Game installation and launch engine are not wired yet.").color(Color32::from_rgb(220, 178, 119)).size(12.0));
+            if let Some(progress) = &self.install_progress {
+                let fraction = if progress.total == 0 { 0.0 } else { progress.completed as f32 / progress.total as f32 };
+                ui.add(egui::ProgressBar::new(fraction).text(format!("{}  {}/{}", progress.phase, progress.completed, progress.total)));
+            }
+        });
+        ui.add_space(12.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("JAVA RUNTIME").size(10.0).color(Color32::GRAY).strong());
+            ui.label(&self.java_status);
+            ui.label(RichText::new(format!("Game data: {}", self.game_root.display())).size(10.0).color(Color32::GRAY));
         });
     }
 
@@ -434,15 +470,22 @@ impl LunarApp {
         });
         ui.add_space(10.0);
         ui.group(|ui| {
-            ui.label(RichText::new("NETWORK").strong());
-            ui.label("Minecraft metadata: piston-meta.mojang.com");
-            ui.label("Requests use HTTPS with a bounded timeout.");
+            ui.label(RichText::new("JAVA RUNTIME").strong());
+            ui.label(&self.java_status);
+            if ui.button("Detect Java again").clicked() {
+                self.java_status = launcher::detect_java().unwrap_or_else(|error| error.to_string());
+            }
         });
         ui.add_space(10.0);
         ui.group(|ui| {
-            ui.label(RichText::new("APPEARANCE").strong());
-            ui.label("LUNAR dark interface");
-            ui.label("More appearance controls will be added with the completed settings store.");
+            ui.label(RichText::new("MEMORY ALLOCATION").strong());
+            ui.add(egui::Slider::new(&mut self.memory_mb, 512..=16384).step_by(512.0).suffix(" MB"));
+        });
+        ui.add_space(10.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("GAME DIRECTORY").strong());
+            ui.label(self.game_root.display().to_string());
+            ui.label("Minecraft versions, libraries, assets and logs are stored locally.");
         });
     }
 }
