@@ -35,8 +35,6 @@ impl LunarApp {
         style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 34, 46);
         style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(47, 57, 75);
         style.visuals.widgets.active.bg_fill = Color32::from_rgb(77, 112, 180);
-        style.visuals.window_rounding = egui::CornerRadius::same(12);
-        style.visuals.widgets非interactive = style.visuals.widgets.noninteractive.clone();
         style.spacing.item_spacing = Vec2::new(12.0, 12.0);
         cc.egui_ctx.set_style(style);
 
@@ -119,7 +117,7 @@ impl LunarApp {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("◒").size(27.0).color(self.accent).strong());
-                    ui.label(RichText::new("LUNAR").size(21.0).strong().letter_spacing(2.0));
+                    ui.label(RichText::new("LUNAR").size(21.0).strong());
                 });
                 ui.add_space(34.0);
                 for (label, screen) in [
