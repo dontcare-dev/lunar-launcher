@@ -309,6 +309,10 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     let metadata_url = entry.get("url").and_then(Value::as_str).context("Version manifest entry has no metadata URL")?;
     let directory = root.join("versions").join(version_id);
     fs::create_dir_all(&directory)?;
+    let install_marker = directory.join(".lunar-installed");
+    if install_marker.exists() {
+        fs::remove_file(&install_marker)?;
+    }
     let metadata_path = directory.join(format!("{version_id}.json"));
     download(&http, metadata_url, &metadata_path, entry.get("sha1").and_then(Value::as_str))?;
     let metadata: Value = serde_json::from_slice(&fs::read(&metadata_path)?)?;
