@@ -29,6 +29,7 @@ pub struct InstalledVersion {
     pub libraries: Vec<PathBuf>,
     pub natives: PathBuf,
     pub metadata: Value,
+    pub game_directory: Option<PathBuf>,
 }
 
 pub fn game_directory() -> Result<PathBuf> {
@@ -442,6 +443,7 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
         libraries,
         natives,
         metadata,
+        game_directory: None,
     })
 }
 
@@ -507,7 +509,8 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     if runtime_major < required_major {
         bail!("Minecraft {} requires Java {}, but the detected runtime is Java {}", installed.id, required_major, runtime_major);
     }
-    let game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
+    let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
+    let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let assets_dir = game_dir.join("assets");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = installed.libraries.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join(separator);
@@ -640,6 +643,7 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
         game_assets,
         natives: directory.join("natives"),
         metadata,
+        game_directory: None,
     })
 }
 

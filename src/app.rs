@@ -627,59 +627,6 @@ impl LunarApp {
         if self.content_busy { ui.spinner(); }
     }
 \n
-    fn content(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Content", "Discover and install Minecraft content through Modrinth.");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
-            ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
-        });
-        ui.horizontal(|ui| {
-            ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
-            if ui.add_enabled(!self.content_busy, egui::Button::new("Search")).clicked() {
-                let query = self.content_query.clone();
-                let kind = self.content_kind.clone();
-                let (tx, rx) = mpsc::channel();
-                self.content_search_rx = Some(rx);
-                self.content_busy = true;
-                self.status = "Searching Modrinth…".into();
-                std::thread::spawn(move || { let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string())); });
-            }
-        });
-        if self.content_kind == "modpack" {
-            ui.label(RichText::new("Modpacks install into separate instance folders with mods, configs and overrides downloaded automatically. Loader launch integration remains pending.").size(11.0).color(Color32::GRAY));
-        } else {
-            ui.label(RichText::new("Resource packs install directly into Minecraft's resourcepacks folder.").size(11.0).color(Color32::GRAY));
-        }
-        egui::ScrollArea::vertical().max_height(430.0).show(ui, |ui| {
-            for project in self.content_results.clone() {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&project.title).strong().size(15.0));
-                            ui.label(RichText::new(format!("{} downloads · {}", project.downloads, project.slug)).size(10.0).color(Color32::GRAY));
-                            ui.label(RichText::new(&project.description).size(11.0).color(Color32::GRAY));
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add_enabled(!self.content_busy, egui::Button::new("Install")).clicked() {
-                                let id = project.project_id.clone();
-                                let root = self.game_root.clone();
-                                let kind = self.content_kind.clone();
-                                let (tx, rx) = mpsc::channel();
-                                self.content_install_rx = Some(rx);
-                                self.content_busy = true;
-                                self.status = format!("Installing {}…", project.title);
-                                std::thread::spawn(move || {
-                                    let result = if kind == "resourcepack" { crate::content::install_resource_pack(&id, &root) } else { crate::content::install_modpack(&id, &root) }.map_err(|error| format!("{error:#}"));
-                                    let _ = tx.send(result);
-                                });
-                            }
-                        });
-                    });
-                });
-            }
-        });
-        if self.content_busy { ui.spinner(); }
-    }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Launcher preferences.");
@@ -774,7 +721,7 @@ impl eframe::App for LunarApp {
                     Screen::Play => self.play(ui),
                     Screen::Versions => self.versions(ui),
                     Screen::Profiles => self.profiles(ui),
-                    Screen::Content => self.content(ui)
+                    Screen::Content => self.content(ui),
                     Screen::Settings => self.settings(ui),
                 }
             });

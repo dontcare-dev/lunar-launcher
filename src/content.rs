@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+use serde::Serialize;
 use sha1::{Digest, Sha1};
 use std::{fs, io::{Cursor, Read}, path::{Component, Path, PathBuf}};
 use zip::ZipArchive;
@@ -60,7 +61,7 @@ fn safe_relative(value: &str) -> Result<PathBuf> {
 }
 
 pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
-    if !matches!(kind, "modpack" | "resourcepack") { bail!("Unsupported Modrinth project type"); }
+    if !matches!(kind, "modpack" | "resourcepack" | "mod") { bail!("Unsupported Modrinth project type"); }
     let facets = format!("[[\"project_type:{kind}\"]]");
     let response = client()?.get(format!("{API}/search"))
         .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30")])
@@ -153,3 +154,80 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     install_modpack_bytes(&bytes, root)
 }
 
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InstalledPack {
+    pub name: String,
+    pub version: String,
+    pub minecraft: String,
+    pub loaders: std::collections::BTreeMap<String, String>,
+    pub instance: PathBuf,
+}
+
+pub fn installed_modpacks(root: &Path) -> Result<Vec<InstalledPack>> {
+    let mut packs = Vec::new();
+    let directory = root.join("modpacks");
+    if !directory.exists() { return Ok(packs); }
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() { continue; }
+        let instance = entry.path().join("instance");
+        let profile_path = entry.path().join("lunar-modpack.json");
+        if !profile_path.exists() { continue; }
+        let value: ValuePack = serde_json::from_slice(&fs::read(profile_path)?)?;
+        packs.push(InstalledPack {
+            name: value.name,
+            version: value.version,
+            minecraft: value.minecraft,
+            loaders: value.loaders,
+            instance,
+        });
+    }
+    packs.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(packs)
+}
+
+#[derive(Deserialize)]
+struct ValuePack {
+    name: String,
+    version: String,
+    minecraft: String,
+    #[serde(default)]
+    loaders: std::collections::BTreeMap<String, String>,
+}
+
+pub fn install_mod(project_id: &str, root: &Path) -> Result<String> {
+    let http = client()?;
+    let versions = http.get(format!("{API}/project/{project_id}/version"))
+        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
+    let version = versions.first().context("No compatible mod version was found")?;
+    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
+        .context("Mod version contains no downloadable file")?;
+    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
+    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1")) {
+        if !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Mod checksum verification failed"); }
+    }
+    let directory = root.join("mods");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(&file.filename);
+    fs::write(&destination, bytes)?;
+    Ok(destination.display().to_string())
+}
+
+pub fn list_files(root: &Path, kind: &str) -> Result<Vec<PathBuf>> {
+    let directory = root.join(kind);
+    if !directory.exists() { return Ok(Vec::new()); }
+    let mut files = fs::read_dir(directory)?.filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| entry.path()).collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+pub fn remove_file(path: &Path, root: &Path, kind: &str) -> Result<()> {
+    let directory = root.join(kind).canonicalize()?;
+    let target = path.canonicalize()?;
+    if !target.starts_with(&directory) || !target.is_file() { bail!("Selected content file is outside its managed directory"); }
+    fs::remove_file(target)?;
+    Ok(())
+}
