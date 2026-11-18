@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluates_library_rules() {
+    fn resolves_maven_coordinates() {\n        assert_eq!(maven_artifact_path("com.mojang:netty:1.8.8", None).as_deref(), Some("com/mojang/netty/1.8.8/netty-1.8.8.jar"));\n        assert_eq!(maven_artifact_path("org.lwjgl.lwjgl:lwjgl:2.9.1", Some("natives-linux")).as_deref(), Some("org/lwjgl/lwjgl/lwjgl/2.9.1/lwjgl-2.9.1-natives-linux.jar"));\n    }\n\n    #[test]\n    fn evaluates_library_rules() {
         assert!(rules_allow(&json!({})));
         assert!(rules_allow(&json!({
             "rules": [{"action": "allow", "os": {"name": current_os()}}]
