@@ -96,6 +96,8 @@ pub struct LunarApp {
     content_busy: bool,
     content_search_rx: Option<Receiver<Result<Vec<crate::content::Project>, String>>>,
     content_install_rx: Option<Receiver<Result<String, String>>>,
+    installed_packs: Vec<crate::content::InstalledPack>,
+    modpack_launch_rx: Option<Receiver<Result<InstalledVersion, String>>>,
 }
 
 impl LunarApp {
@@ -143,6 +145,8 @@ impl LunarApp {
             content_busy: false,
             content_search_rx: None,
             content_install_rx: None,
+            installed_packs: crate::content::installed_modpacks(&game_root).unwrap_or_default(),
+            modpack_launch_rx: None,
         };
         app.refresh_versions();
         app
@@ -573,11 +577,14 @@ impl LunarApp {
     }
 
 
+\n
+
     fn content(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Content", "Discover and install Minecraft content through Modrinth.");
+        Self::heading(ui, "Content", "Install and manage Minecraft content without manual file handling.");
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
             ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
+            ui.selectable_value(&mut self.content_kind, "mod".into(), "Mods");
         });
         ui.horizontal(|ui| {
             ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
@@ -591,12 +598,13 @@ impl LunarApp {
                 std::thread::spawn(move || { let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string())); });
             }
         });
-        if self.content_kind == "modpack" {
-            ui.label(RichText::new("Modpacks install into separate instance folders with mods, configs and overrides downloaded automatically. Loader launch integration remains pending.").size(11.0).color(Color32::GRAY));
-        } else {
-            ui.label(RichText::new("Resource packs install directly into Minecraft's resourcepacks folder.").size(11.0).color(Color32::GRAY));
-        }
-        egui::ScrollArea::vertical().max_height(430.0).show(ui, |ui| {
+        let description = match self.content_kind.as_str() {
+            "modpack" => "Modpacks install into separate instances with their mods and configurations.",
+            "resourcepack" => "Resource packs install directly into Minecraft's resource-pack library.",
+            _ => "Install mods into your Minecraft mods folder.",
+        };
+        ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
             for project in self.content_results.clone() {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
@@ -615,7 +623,11 @@ impl LunarApp {
                                 self.content_busy = true;
                                 self.status = format!("Installing {}…", project.title);
                                 std::thread::spawn(move || {
-                                    let result = if kind == "resourcepack" { crate::content::install_resource_pack(&id, &root) } else { crate::content::install_modpack(&id, &root) }.map_err(|error| format!("{error:#}"));
+                                    let result = match kind.as_str() {
+                                        "resourcepack" => crate::content::install_resource_pack(&id, &root),
+                                        "mod" => crate::content::install_mod(&id, &root),
+                                        _ => crate::content::install_modpack(&id, &root),
+                                    }.map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
                                 });
                             }
@@ -624,9 +636,44 @@ impl LunarApp {
                 });
             }
         });
-        if self.content_busy { ui.spinner(); }
+        ui.add_space(8.0);
+        ui.label(RichText::new("INSTALLED MODPACKS").strong().size(11.0).color(self.accent));
+        if self.installed_packs.is_empty() { ui.label(RichText::new("No modpacks installed.").size(11.0).color(Color32::GRAY)); }
+        for pack in self.installed_packs.clone() {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&pack.name).strong());
+                        ui.label(RichText::new(format!("Minecraft {} · {}", pack.minecraft, pack.loaders.keys().cloned().collect::<Vec<_>>().join(", "))).size(10.0).color(Color32::GRAY));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
+                            if self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|p| &p.name == name)) {
+                                let root = self.game_root.clone();
+                                let (tx, rx) = mpsc::channel();
+                                self.modpack_launch_rx = Some(rx);
+                                self.status = format!("Preparing {}…", pack.name);
+                                std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
+                            } else { self.status = "Select an offline profile first".into(); }
+                        }
+                    });
+                });
+            });
+        }
+        ui.horizontal(|ui| {
+            for (label, folder) in [("Open resource packs", "resourcepacks"), ("Open mods", "mods")] {
+                if ui.button(label).clicked() {
+                    let path = self.game_root.join(folder);
+                    let _ = fs::create_dir_all(&path);
+                    let result = if cfg!(target_os = "windows") { Command::new("explorer").arg(&path).spawn() }
+                        else if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
+                        else { Command::new("xdg-open").arg(&path).spawn() };
+                    self.status = result.map(|_| format!("Opened {label}")).unwrap_or_else(|error| error.to_string());
+                }
+            }
+        });
+        if self.content_busy || self.modpack_launch_rx.is_some() { ui.spinner(); }
     }
-\n
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Launcher preferences.");
@@ -695,12 +742,28 @@ impl eframe::App for LunarApp {
         }
         if let Some(rx) = &self.content_install_rx {
             if let Ok(result) = rx.try_recv() {
-                match result { Ok(path) => self.status = format!("Installed to {path}"), Err(error) => self.status = error }
+                match result { Ok(path) => { self.status = format!("Installed to {path}"); self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default(); }, Err(error) => self.status = error }
                 self.content_install_rx = None;
                 self.content_busy = false;
             }
         }
-        if self.content_search_rx.is_some() || self.content_install_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
+        if let Some(rx) = &self.modpack_launch_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.modpack_launch_rx = None;
+                match result {
+                    Ok(installed) => {
+                        if let Some(profile) = self.profiles.profiles.iter().find(|p| Some(p.name.as_str()) == self.profiles.selected.as_deref()) {
+                            match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
+                                Ok(process) => { self.game_process = Some(process); self.status = format!("Launching {}", installed.id); }
+                                Err(error) => self.status = format!("{error:#}"),
+                            }
+                        } else { self.status = "Select an offline profile first".into(); }
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+        }
+        if self.content_search_rx.is_some() || self.content_install_rx.is_some() || self.modpack_launch_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))
