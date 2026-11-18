@@ -477,7 +477,6 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
     }
     libraries.push(client_jar.clone());
     let asset_index_id = metadata.pointer("/assetIndex/id").and_then(Value::as_str).context("Asset index ID missing")?;
-    let asset_index = root.join("assets").join("indexes").join(format!("{asset_index_id}.json"));
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
     Ok(InstalledVersion {
         id: version_id.to_owned(),
