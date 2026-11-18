@@ -462,3 +462,29 @@ pub fn installed_versions(root: &Path) -> Result<BTreeSet<String>> {
     }
     Ok(versions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_java_runtime_versions() {
+        assert_eq!(parse_java_major("openjdk version \"21.0.4\" 2024-07-16"), Some(21));
+        assert_eq!(parse_java_major("java version \"1.8.0_412\""), Some(8));
+        assert_eq!(parse_java_major("not a version"), None);
+    }
+
+    #[test]
+    fn evaluates_library_rules() {
+        assert!(rules_allow(&json!({})));
+        assert!(rules_allow(&json!({
+            "rules": [{"action": "allow", "os": {"name": current_os()}}]
+        })));
+        assert!(!rules_allow(&json!({
+            "rules": [{"action": "disallow", "os": {"name": current_os()}}]
+        })));
+        assert!(!rules_allow(&json!({
+            "rules": [{"action": "allow", "features": {"is_demo_user": true}}]
+        })));
+    }
+}
