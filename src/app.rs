@@ -404,6 +404,9 @@ impl LunarApp {
                             self.selected_version = version.id.clone();
                         }
                         ui.label(RichText::new(&version.kind).size(11.0).color(Color32::GRAY));
+                        if self.installed_ids.contains(&version.id) {
+                            ui.label(RichText::new("Installed").size(10.0).color(self.accent));
+                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(RichText::new(version.release_time.get(..10).unwrap_or("")).size(11.0).color(Color32::GRAY));
                         });
