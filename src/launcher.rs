@@ -470,11 +470,12 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
             if !rules_allow(library) {
                 continue;
             }
-            if let Some(relative) = library.pointer("/downloads/artifact/path").and_then(Value::as_str) {
-                let path = libraries_root.join(relative);
-                if path.exists() {
-                    libraries.push(path);
-                }
+            let path = library.pointer("/downloads/artifact/path")
+                .and_then(Value::as_str)
+                .map(|relative| libraries_root.join(relative))
+                .or_else(|| library.get("name").and_then(Value::as_str).and_then(|name| maven_artifact_path(name, None)).map(|relative| libraries_root.join(relative)));
+            if let Some(path) = path.filter(|path| path.exists()) {
+                libraries.push(path);
             }
         }
     }
