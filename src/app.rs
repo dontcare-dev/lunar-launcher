@@ -158,6 +158,14 @@ impl LunarApp {
         }
     }
 
+    fn stop_game(&mut self) {
+        if let Some(mut process) = self.game_process.take() {
+            let _ = process.kill();
+            let _ = process.wait();
+            self.status = "Minecraft stopped".into();
+        }
+    }
+
     fn launch_selected(&mut self) {
         let Some(name) = self.profiles.selected.clone() else {
             self.status = "Create or select an offline profile first".into();
@@ -345,6 +353,10 @@ impl LunarApp {
             ui.horizontal(|ui| {
                 if self.install_rx.is_some() {
                     ui.add_enabled(false, egui::Button::new("Installing…"));
+                } else if self.game_process.is_some() {
+                    if ui.button("Stop Minecraft").clicked() {
+                        self.stop_game();
+                    }
                 } else if installed {
                     if ui.add_sized([150.0, 38.0], egui::Button::new(RichText::new("Launch Minecraft").strong()).fill(Color32::from_rgb(78, 111, 171))).clicked() {
                         self.launch_selected();
