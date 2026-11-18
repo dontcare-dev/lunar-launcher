@@ -1,6 +1,6 @@
-use crate::{minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
+use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::{path::PathBuf, process::Child, sync::mpsc::{self, Receiver, TryRecvError}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -38,7 +38,10 @@ impl LunarApp {
         style.spacing.item_spacing = Vec2::new(12.0, 12.0);
         cc.egui_ctx.set_style(style);
 
-        Self {
+        let game_root = launcher::game_directory().unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(".lunar-data"));
+        let installed_ids = launcher::installed_versions(&game_root).unwrap_or_default();
+        let java_status = launcher::detect_java().unwrap_or_else(|error| error.to_string());
+        let mut app = Self {
             profiles: ProfileStore::load(),
             screen: Screen::Home,
             username: String::new(),
@@ -50,7 +53,18 @@ impl LunarApp {
             snapshots: false,
             status: "Ready".into(),
             accent: Color32::from_rgb(137, 169, 232),
-        }
+            game_root,
+            installed_ids,
+            installed_version: None,
+            install_rx: None,
+            progress_rx: None,
+            install_progress: None,
+            java_status,
+            memory_mb: 4096,
+            game_process: None,
+        };
+        app.refresh_versions();
+        app
     }
 
     fn refresh_versions(&mut self) {
@@ -64,6 +78,104 @@ impl LunarApp {
             let result = minecraft::fetch_manifest().map_err(|error| error.to_string());
             let _ = tx.send(result);
         });
+    }
+
+    fn start_install(&mut self) {
+        if self.install_rx.is_some() || self.selected_version.is_empty() {
+            return;
+        }
+        let version = self.selected_version.clone();
+        let root = self.game_root.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let (progress_tx, progress_rx) = mpsc::channel();
+        self.install_rx = Some(result_rx);
+        self.progress_rx = Some(progress_rx);
+        self.install_progress = Some(InstallProgress { phase: "Preparing".into(), completed: 0, total: 0 });
+        self.status = format!("Installing Minecraft {version}…");
+        std::thread::spawn(move || {
+            let result = launcher::install(&version, &root, |progress| {
+                let _ = progress_tx.send(progress);
+            }).map_err(|error| format!("{error:#}"));
+            let _ = result_tx.send(result);
+        });
+    }
+
+    fn poll_launcher(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.progress_rx {
+            while let Ok(progress) = rx.try_recv() {
+                self.install_progress = Some(progress);
+            }
+        }
+        let result = self.install_rx.as_ref().map(Receiver::try_recv);
+        match result {
+            Some(Ok(Ok(installed))) => {
+                self.selected_version = installed.id.clone();
+                self.installed_ids.insert(installed.id.clone());
+                self.installed_version = Some(installed);
+                self.install_rx = None;
+                self.progress_rx = None;
+                self.install_progress = None;
+                self.status = "Minecraft installation complete".into();
+            }
+            Some(Ok(Err(error))) => {
+                self.status = error;
+                self.install_rx = None;
+                self.progress_rx = None;
+                self.install_progress = None;
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.status = "Minecraft installation stopped unexpectedly".into();
+                self.install_rx = None;
+                self.progress_rx = None;
+                self.install_progress = None;
+            }
+            _ => {}
+        }
+        if let Some(process) = &mut self.game_process {
+            match process.try_wait() {
+                Ok(Some(status)) => {
+                    self.status = format!("Minecraft exited with {status}");
+                    self.game_process = None;
+                }
+                Ok(None) => self.status = "Minecraft is running".into(),
+                Err(error) => {
+                    self.status = format!("Could not read Minecraft process: {error}");
+                    self.game_process = None;
+                }
+            }
+        }
+        if self.install_rx.is_some() || self.game_process.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+
+    fn launch_selected(&mut self) {
+        let Some(name) = self.profiles.selected.clone() else {
+            self.status = "Create or select an offline profile first".into();
+            return;
+        };
+        let Some(profile) = self.profiles.profiles.iter().find(|profile| profile.name == name) else {
+            self.status = "Selected offline profile could not be found".into();
+            return;
+        };
+        let installed = match self.installed_version.clone() {
+            Some(installed) if installed.id == self.selected_version => installed,
+            _ => match launcher::load_installed(&self.selected_version, &self.game_root) {
+                Ok(installed) => installed,
+                Err(error) => {
+                    self.status = error.to_string();
+                    return;
+                }
+            },
+        };
+        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
+            Ok(process) => {
+                self.installed_version = Some(installed);
+                self.game_process = Some(process);
+                self.status = "Minecraft is running".into();
+            }
+            Err(error) => self.status = format!("{error:#}"),
+        }
     }
 
     fn poll_versions(&mut self, ctx: &egui::Context) {
@@ -329,7 +441,7 @@ impl LunarApp {
 
 impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_versions(ctx);
+        self.poll_versions(ctx);\n        self.poll_launcher(ctx);
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))
