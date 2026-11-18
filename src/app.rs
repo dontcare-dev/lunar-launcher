@@ -23,6 +23,15 @@ pub struct LunarApp {
     snapshots: bool,
     status: String,
     accent: Color32,
+    game_root: PathBuf,
+    installed_ids: std::collections::BTreeSet<String>,
+    installed_version: Option<InstalledVersion>,
+    install_rx: Option<Receiver<Result<InstalledVersion, String>>>,
+    progress_rx: Option<Receiver<InstallProgress>>,
+    install_progress: Option<InstallProgress>,
+    java_status: String,
+    memory_mb: u32,
+    game_process: Option<Child>,
 }
 
 impl LunarApp {
