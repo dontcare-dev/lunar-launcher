@@ -35,7 +35,7 @@ pub fn install_java(major: u32, root: &Path) -> Result<PathBuf> {
         let mut archive = ZipArchive::new(Cursor::new(bytes)).context("Invalid Java runtime archive")?;
         for index in 0..archive.len() {
             let mut file = archive.by_index(index)?;
-            let Some(relative) = file.enclosed_name().map(Path::to_path_buf) else { continue };
+            let Some(relative) = file.enclosed_name() else { continue };
             let destination = directory.join(relative);
             if file.is_dir() { fs::create_dir_all(destination)?; }
             else {
