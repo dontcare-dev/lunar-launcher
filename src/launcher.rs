@@ -174,11 +174,11 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
         .and_then(|versions| versions.iter().find(|entry| entry.get("id").and_then(Value::as_str) == Some(version_id)))
         .ok_or_else(|| anyhow!("Minecraft version {version_id} was not found in the official manifest"))?;
     let metadata_url = entry.get("url").and_then(Value::as_str).context("Version manifest entry has no metadata URL")?;
-    let metadata = fetch_json(&http, metadata_url)?;
     let directory = root.join("versions").join(version_id);
     fs::create_dir_all(&directory)?;
     let metadata_path = directory.join(format!("{version_id}.json"));
-    fs::write(&metadata_path, serde_json::to_vec_pretty(&metadata)?)?;
+    download(&http, metadata_url, &metadata_path, entry.get("sha1").and_then(Value::as_str))?;
+    let metadata: Value = serde_json::from_slice(&fs::read(&metadata_path)?)?;
     let client_jar = directory.join(format!("{version_id}.jar"));
     let client_download = metadata.pointer("/downloads/client").context("This version does not provide a client download")?;
     download(
