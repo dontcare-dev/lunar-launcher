@@ -595,14 +595,6 @@ impl LunarApp {
             ui.label(RichText::new("Modpacks install into separate instance folders with mods, configs and overrides downloaded automatically. Loader launch integration remains pending.").size(11.0).color(Color32::GRAY));
         } else {
             ui.label(RichText::new("Resource packs install directly into Minecraft's resourcepacks folder.").size(11.0).color(Color32::GRAY));
-            if ui.button("Import resource-pack ZIP").clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Resource pack", &["zip"]).pick_file() {
-                    match crate::content::import_resource_pack(&path, &self.game_root) {
-                        Ok(path) => self.status = format!("Installed resource pack: {path}"),
-                        Err(error) => self.status = error.to_string(),
-                    }
-                }
-            }
         }
         egui::ScrollArea::vertical().max_height(430.0).show(ui, |ui| {
             for project in self.content_results.clone() {
