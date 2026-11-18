@@ -291,6 +291,17 @@ fn replace_arguments(arguments: &mut [String], values: &[(&str, String)]) {
     }
 }
 
+fn parse_java_major(version_line: &str) -> Option<u32> {
+    let version = version_line.split('"').nth(1).unwrap_or(version_line);
+    let mut parts = version.split('.');
+    let first = parts.next()?.parse::<u32>().ok()?;
+    if first == 1 {
+        parts.next()?.parse::<u32>().ok()
+    } else {
+        Some(first)
+    }
+}
+
 pub fn detect_java() -> Result<String> {
     let output = Command::new(if cfg!(target_os = "windows") { "java.exe" } else { "java" })
         .arg("-version")
@@ -307,6 +318,12 @@ pub fn detect_java() -> Result<String> {
 
 pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32) -> Result<Child> {
     let java = if cfg!(target_os = "windows") { "java.exe" } else { "java" };
+    let runtime = detect_java()?;
+    let runtime_major = parse_java_major(&runtime).ok_or_else(|| anyhow!("Could not identify the installed Java version"))?;
+    let required_major = installed.metadata.pointer("/javaVersion/majorVersion").and_then(Value::as_u64).unwrap_or(8) as u32;
+    if runtime_major < required_major {
+        bail!("Minecraft {} requires Java {}, but the detected runtime is Java {}", installed.id, required_major, runtime_major);
+    }
     let game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
     let assets_dir = game_dir.join("assets");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
