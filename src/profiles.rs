@@ -62,8 +62,28 @@ impl ProfileStore {
         let bytes = serde_json::to_vec_pretty(self)?;
         let temporary = path.with_extension("json.tmp");
         fs::write(&temporary, bytes)?;
-        fs::rename(temporary, path)?;
-        Ok(())
+        let backup = path.with_extension("json.bak");
+        if backup.exists() {
+            fs::remove_file(&backup)?;
+        }
+        let had_previous = path.exists();
+        if had_previous {
+            fs::rename(&path, &backup)?;
+        }
+        match fs::rename(&temporary, &path) {
+            Ok(()) => {
+                if had_previous {
+                    let _ = fs::remove_file(backup);
+                }
+                Ok(())
+            }
+            Err(error) => {
+                if had_previous {
+                    let _ = fs::rename(backup, &path);
+                }
+                Err(error.into())
+            }
+        }
     }
 
     pub fn add(&mut self, name: &str) -> Result<()> {
