@@ -100,7 +100,10 @@ fn download(client: &reqwest::blocking::Client, url: &str, destination: &Path, e
             bail!("Checksum mismatch while downloading {url}");
         }
     }
-    if destination.exists() {\n        fs::remove_file(destination)?;\n    }\n    fs::rename(temporary, destination)?;
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    fs::rename(temporary, destination)?;
     Ok(())
 }
 
