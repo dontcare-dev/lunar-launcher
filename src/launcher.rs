@@ -3,10 +3,11 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
     collections::{BTreeSet, VecDeque},
-    fs::{self, File},
-    io::{Read, Write},
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex},
 };
 
 const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
