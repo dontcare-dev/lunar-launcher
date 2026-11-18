@@ -145,7 +145,7 @@ impl LunarApp {
         Self::heading(ui, "Welcome to LUNAR", "Your Minecraft setup, without the clutter.");
         egui::Frame::new()
             .fill(Color32::from_rgb(23, 31, 47))
-            .stroke(Stroke::new(1.0, Color32::from_rgb(53, 68, 94)))
+            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(53, 68, 94)))
             .corner_radius(egui::CornerRadius::same(18))
             .inner_margin(egui::Margin::same(28))
             .show(ui, |ui| {
@@ -162,15 +162,16 @@ impl LunarApp {
                 });
             });
         ui.add_space(20.0);
+        let card_style = ui.style().clone();
         ui.columns(2, |columns| {
-            egui::Frame::group(ui.style()).show(&mut columns[0], |ui| {
+            egui::Frame::group(&card_style).show(&mut columns[0], |ui| {
                 ui.label(RichText::new("ACTIVE PROFILE").size(10.0).color(Color32::GRAY).strong());
                 ui.add_space(8.0);
                 ui.label(RichText::new(self.profiles.selected.as_deref().unwrap_or("No profile selected")).size(20.0).strong());
                 ui.label(RichText::new("Offline identity").size(12.0).color(Color32::GRAY));
                 if ui.button("Manage profiles").clicked() { self.screen = Screen::Profiles; }
             });
-            egui::Frame::group(ui.style()).show(&mut columns[1], |ui| {
+            egui::Frame::group(&card_style).show(&mut columns[1], |ui| {
                 ui.label(RichText::new("LATEST RELEASE").size(10.0).color(Color32::GRAY).strong());
                 ui.add_space(8.0);
                 let latest = self.manifest.as_ref().map(|m| m.latest.release.as_str()).unwrap_or("Not loaded");
