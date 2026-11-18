@@ -1,6 +1,50 @@
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
-use std::{path::PathBuf, process::Child, sync::mpsc::{self, Receiver, TryRecvError}};
+use std::{fs, path::PathBuf, process::Child, sync::mpsc::{self, Receiver, TryRecvError}};
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct LauncherPreferences {
+    memory_mb: u32,
+    snapshots: bool,
+}
+
+impl Default for LauncherPreferences {
+    fn default() -> Self {
+        Self { memory_mb: 4096, snapshots: false }
+    }
+}
+
+impl LauncherPreferences {
+    fn path() -> Option<PathBuf> {
+        directories::ProjectDirs::from("dev", "SilverDevStudios", "LUNAR")
+            .map(|dirs| dirs.config_dir().join("preferences.json"))
+    }
+
+    fn load() -> Self {
+        Self::path()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self) {
+        if let Some(path) = Self::path() {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+                let temporary = path.with_extension("tmp");
+                if fs::write(&temporary, bytes).is_ok() {
+                    if path.exists() {
+                        let _ = fs::remove_file(&path);
+                    }
+                    let _ = fs::rename(temporary, path);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -50,6 +94,7 @@ impl LunarApp {
         let game_root = launcher::game_directory().unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(".lunar-data"));
         let installed_ids = launcher::installed_versions(&game_root).unwrap_or_default();
         let java_status = launcher::detect_java().unwrap_or_else(|error| error.to_string());
+        let preferences = LauncherPreferences::load();
         let mut app = Self {
             profiles: ProfileStore::load(),
             screen: Screen::Home,
@@ -59,7 +104,7 @@ impl LunarApp {
             manifest: None,
             version_rx: None,
             selected_version: String::new(),
-            snapshots: false,
+            snapshots: preferences.snapshots,
             status: "Ready".into(),
             accent: Color32::from_rgb(137, 169, 232),
             game_root,
@@ -69,7 +114,7 @@ impl LunarApp {
             progress_rx: None,
             install_progress: None,
             java_status,
-            memory_mb: 4096,
+            memory_mb: preferences.memory_mb.clamp(512, 16384),
             game_process: None,
         };
         app.refresh_versions();
@@ -388,7 +433,11 @@ impl LunarApp {
         Self::heading(ui, "Versions", "Official Minecraft Java Edition release metadata.");
         ui.horizontal(|ui| {
             if ui.button("Refresh manifest").clicked() { self.refresh_versions(); }
+            let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
+            if previous_snapshots != self.snapshots {
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots }.save();
+            }
         });
         if let Some(manifest) = &self.manifest {
             ui.label(format!("Latest release: {}   ·   Latest snapshot: {}", manifest.latest.release, manifest.latest.snapshot));
@@ -480,6 +529,7 @@ impl LunarApp {
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Launcher preferences.");
+        let previous_memory = self.memory_mb;
         ui.group(|ui| {
             ui.label(RichText::new("IDENTITY").strong());
             ui.label("Authentication mode: Offline profiles only");
@@ -499,6 +549,9 @@ impl LunarApp {
             ui.add(egui::Slider::new(&mut self.memory_mb, 512..=16384).step_by(512.0).suffix(" MB"));
         });
         ui.add_space(10.0);
+        if previous_memory != self.memory_mb {
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots }.save();
+        }
         ui.group(|ui| {
             ui.label(RichText::new("GAME DIRECTORY").strong());
             ui.label(self.game_root.display().to_string());
