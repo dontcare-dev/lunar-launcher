@@ -796,28 +796,22 @@ impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
-        if let Some(rx) = &self.content_search_rx {
-            if let Ok(result) = rx.try_recv() {
+        if let Some(rx) = &self.content_search_rx
+            && let Ok(result) = rx.try_recv() {
                 match result { Ok(items) => { self.content_results = items; self.status = format!("Found {} projects", self.content_results.len()); }, Err(error) => self.status = error }
                 self.content_search_rx = None;
                 self.content_busy = false;
-            }
-        }
-        if let Some(rx) = &self.content_install_rx {
-            if let Ok(result) = rx.try_recv() {
+        if let Some(rx) = &self.content_install_rx
+            && let Ok(result) = rx.try_recv() {
                 match result { Ok(path) => { self.status = format!("Installed to {path}"); self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default(); }, Err(error) => self.status = error }
                 self.content_install_rx = None;
                 self.content_busy = false;
-            }
-        }
-        if let Some(rx) = &self.java_install_rx {
-            if let Ok(result) = rx.try_recv() {
+        if let Some(rx) = &self.java_install_rx
+            && let Ok(result) = rx.try_recv() {
                 self.java_install_rx = None;
                 match result { Ok(path) => { self.java_status = format!("Managed runtime: {path}"); self.status = "Java installation complete".into(); }, Err(error) => self.status = error }
-            }
-        }
-        if let Some(rx) = &self.modpack_launch_rx {
-            if let Ok(result) = rx.try_recv() {
+        if let Some(rx) = &self.modpack_launch_rx
+            && let Ok(result) = rx.try_recv() {
                 self.modpack_launch_rx = None;
                 match result {
                     Ok(installed) => {
@@ -830,8 +824,6 @@ impl eframe::App for LunarApp {
                     }
                     Err(error) => self.status = error,
                 }
-            }
-        }
         if self.content_search_rx.is_some() || self.content_install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")

@@ -75,8 +75,8 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
     let version = versions.first().context("No downloadable resource-pack version was found")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The resource-pack version contains no files")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1")) {
-        if !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Resource-pack checksum verification failed"); }
+    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Resource-pack checksum verification failed"); }
     }
     let directory = root.join("resourcepacks");
     fs::create_dir_all(&directory)?;
@@ -183,7 +183,7 @@ pub fn installed_modpacks(root: &Path) -> Result<Vec<InstalledPack>> {
             instance,
         });
     }
-    packs.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    packs.sort_by_key(|pack| pack.name.to_lowercase());
     Ok(packs)
 }
 
