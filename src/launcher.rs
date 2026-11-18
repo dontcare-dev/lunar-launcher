@@ -635,6 +635,22 @@ pub fn load_installed(version_id: &str, root: &Path) -> Result<InstalledVersion>
     })
 }
 
+pub fn remove_version(version_id: &str, root: &Path) -> Result<()> {
+    if version_id.is_empty()
+        || !version_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || version_id == "."
+        || version_id == ".."
+    {
+        bail!("Invalid Minecraft version identifier");
+    }
+    let directory = root.join("versions").join(version_id);
+    if !directory.join(".lunar-installed").exists() {
+        bail!("This version is not a completed LUNAR installation");
+    }
+    fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
 pub fn installed_versions(root: &Path) -> Result<BTreeSet<String>> {
     let mut versions = BTreeSet::new();
     let path = root.join("versions");
