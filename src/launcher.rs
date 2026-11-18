@@ -310,6 +310,15 @@ pub fn install(version_id: &str, root: &Path, mut progress: impl FnMut(InstallPr
     let objects = asset_index.get("objects").and_then(Value::as_object).context("Asset index objects missing")?;
     download_assets(&http, root, objects, &mut progress)?;
     materialize_legacy_assets(root, &asset_index, objects, asset_index_id)?;
+    if let Some(logging_file) = metadata.pointer("/logging/client/file") {
+        if let (Some(id), Some(url)) = (
+            logging_file.get("id").and_then(Value::as_str),
+            logging_file.get("url").and_then(Value::as_str),
+        ) {
+            let path = root.join("assets").join("log_configs").join(id);
+            download(&http, url, &path, logging_file.get("sha1").and_then(Value::as_str))?;
+        }
+    }
 
     libraries.push(client_jar.clone());
     let main_class = metadata.get("mainClass").and_then(Value::as_str).context("Minecraft main class missing")?.to_owned();
@@ -416,6 +425,8 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
         ("${game_directory}", game_dir.to_string_lossy().into_owned()),
         ("${assets_root}", assets_dir.to_string_lossy().into_owned()),
         ("${assets_index_name}", installed.assets.clone()),
+        ("${game_assets}", assets_dir.to_string_lossy().into_owned()),
+        ("${path}", installed.metadata.pointer("/logging/client/file/id").and_then(Value::as_str).map(|id| assets_dir.join("log_configs").join(id).to_string_lossy().into_owned()).unwrap_or_default()),
         ("${auth_uuid}", uuid.to_owned()),
         ("${auth_access_token}", "0".into()),
         ("${user_type}", "legacy".into()),
