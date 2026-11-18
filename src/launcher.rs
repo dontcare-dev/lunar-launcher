@@ -502,15 +502,15 @@ pub fn detect_java() -> Result<String> {
 }
 
 pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32) -> Result<Child> {
-    let java = if cfg!(target_os = "windows") { "java.exe" } else { "java" };
-    let runtime = detect_java()?;
-    let runtime_major = parse_java_major(&runtime).ok_or_else(|| anyhow!("Could not identify the installed Java version"))?;
+    let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
+    let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let required_major = installed.metadata.pointer("/javaVersion/majorVersion").and_then(Value::as_u64).unwrap_or(8) as u32;
+    let java = crate::runtime::find_java(required_major, game_dir).or_else(|| crate::runtime::find_java(required_major, default_game_dir)).unwrap_or_else(|| PathBuf::from(if cfg!(target_os = "windows") { "java.exe" } else { "java" }));
+    let runtime = crate::runtime::version(&java)?;
+    let runtime_major = parse_java_major(&runtime).ok_or_else(|| anyhow!("Could not identify the installed Java version"))?;
     if runtime_major < required_major {
         bail!("Minecraft {} requires Java {}, but the detected runtime is Java {}", installed.id, required_major, runtime_major);
     }
-    let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
-    let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let assets_dir = game_dir.join("assets");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = installed.libraries.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join(separator);

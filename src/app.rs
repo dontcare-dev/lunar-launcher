@@ -96,6 +96,8 @@ pub struct LunarApp {
     content_busy: bool,
     content_search_rx: Option<Receiver<Result<Vec<crate::content::Project>, String>>>,
     content_install_rx: Option<Receiver<Result<String, String>>>,
+    java_install_rx: Option<Receiver<Result<String, String>>>,
+    content_loader: String,
     installed_packs: Vec<crate::content::InstalledPack>,
     modpack_launch_rx: Option<Receiver<Result<InstalledVersion, String>>>,
 }
@@ -145,6 +147,8 @@ impl LunarApp {
             content_busy: false,
             content_search_rx: None,
             content_install_rx: None,
+            java_install_rx: None,
+            content_loader: "fabric".into(),
             installed_packs: crate::content::installed_modpacks(&game_root).unwrap_or_default(),
             modpack_launch_rx: None,
         };
@@ -586,6 +590,11 @@ impl LunarApp {
             ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
             ui.selectable_value(&mut self.content_kind, "mod".into(), "Mods");
         });
+        if self.content_kind == "mod" {
+            egui::ComboBox::from_id_salt("content_loader").selected_text(&self.content_loader).show_ui(ui, |ui| {
+                for loader in ["fabric", "forge", "neoforge", "quilt"] { ui.selectable_value(&mut self.content_loader, loader.to_owned(), loader); }
+            });
+        }
         ui.horizontal(|ui| {
             ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
             if ui.add_enabled(!self.content_busy, egui::Button::new("Search")).clicked() {
@@ -618,6 +627,8 @@ impl LunarApp {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
                                 let kind = self.content_kind.clone();
+                                let minecraft = self.selected_version.clone();
+                                let loader = self.content_loader.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.content_install_rx = Some(rx);
                                 self.content_busy = true;
@@ -625,7 +636,7 @@ impl LunarApp {
                                 std::thread::spawn(move || {
                                     let result = match kind.as_str() {
                                         "resourcepack" => crate::content::install_resource_pack(&id, &root),
-                                        "mod" => crate::content::install_mod(&id, &root),
+                                        "mod" => crate::content::install_mod(&id, &root, &minecraft, &loader),
                                         _ => crate::content::install_modpack(&id, &root),
                                     }.map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
@@ -647,6 +658,12 @@ impl LunarApp {
                         ui.label(RichText::new(format!("Minecraft {} · {}", pack.minecraft, pack.loaders.keys().cloned().collect::<Vec<_>>().join(", "))).size(10.0).color(Color32::GRAY));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Remove").clicked() {
+                            match crate::content::remove_modpack(&pack, &self.game_root) {
+                                Ok(()) => { self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default(); self.status = format!("Removed {}", pack.name); }
+                                Err(error) => self.status = error.to_string(),
+                            }
+                        }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
                             if self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|p| &p.name == name)) {
                                 let root = self.game_root.clone();
@@ -687,6 +704,17 @@ impl LunarApp {
         ui.group(|ui| {
             ui.label(RichText::new("JAVA RUNTIME").strong());
             ui.label(&self.java_status);
+            ui.horizontal(|ui| {
+                for major in [8_u32, 17, 21] {
+                    if ui.add_enabled(self.java_install_rx.is_none(), egui::Button::new(format!("Install Java {major}"))).clicked() {
+                        let root = self.game_root.clone();
+                        let (tx, rx) = mpsc::channel();
+                        self.java_install_rx = Some(rx);
+                        self.status = format!("Installing Java {major}…");
+                        std::thread::spawn(move || { let result = crate::runtime::install_java(major, &root).map(|path| path.display().to_string()).map_err(|error| format!("{error:#}")); let _ = tx.send(result); });
+                    }
+                }
+            });
             if ui.button("Detect Java again").clicked() {
                 self.java_status = launcher::detect_java().unwrap_or_else(|error| error.to_string());
             }
@@ -747,6 +775,12 @@ impl eframe::App for LunarApp {
                 self.content_busy = false;
             }
         }
+        if let Some(rx) = &self.java_install_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.java_install_rx = None;
+                match result { Ok(path) => { self.java_status = format!("Managed runtime: {path}"); self.status = "Java installation complete".into(); }, Err(error) => self.status = error }
+            }
+        }
         if let Some(rx) = &self.modpack_launch_rx {
             if let Ok(result) = rx.try_recv() {
                 self.modpack_launch_rx = None;
@@ -763,7 +797,7 @@ impl eframe::App for LunarApp {
                 }
             }
         }
-        if self.content_search_rx.is_some() || self.content_install_rx.is_some() || self.modpack_launch_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
+        if self.content_search_rx.is_some() || self.content_install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))

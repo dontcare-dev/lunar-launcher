@@ -196,11 +196,14 @@ struct ValuePack {
     loaders: std::collections::BTreeMap<String, String>,
 }
 
-pub fn install_mod(project_id: &str, root: &Path) -> Result<String> {
+pub fn install_mod(project_id: &str, root: &Path, minecraft: &str, loader: &str) -> Result<String> {
     let http = client()?;
+    let game_versions = serde_json::to_string(&vec![minecraft])?;
+    let loaders = if loader.is_empty() { "[]".to_owned() } else { serde_json::to_string(&vec![loader])? };
     let versions = http.get(format!("{API}/project/{project_id}/version"))
+        .query(&[("game_versions", game_versions.as_str()), ("loaders", loaders.as_str())])
         .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
-    let version = versions.first().context("No compatible mod version was found")?;
+    let version = versions.first().context("No mod version matches the selected Minecraft version and loader")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
         .context("Mod version contains no downloadable file")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
@@ -229,5 +232,13 @@ pub fn remove_file(path: &Path, root: &Path, kind: &str) -> Result<()> {
     let target = path.canonicalize()?;
     if !target.starts_with(&directory) || !target.is_file() { bail!("Selected content file is outside its managed directory"); }
     fs::remove_file(target)?;
+    Ok(())
+}
+
+pub fn remove_modpack(pack: &InstalledPack, root: &Path) -> Result<()> {
+    let directory = root.join("modpacks").canonicalize()?;
+    let target = pack.instance.parent().context("Modpack instance path is invalid")?.canonicalize()?;
+    if !target.starts_with(&directory) || !target.join("lunar-modpack.json").exists() { bail!("Selected folder is not a managed LUNAR modpack"); }
+    fs::remove_dir_all(target)?;
     Ok(())
 }
