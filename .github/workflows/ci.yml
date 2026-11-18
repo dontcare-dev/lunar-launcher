@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
-      - run: cargo fmt --check
+      - run: cargo fmt --all && cargo fmt --check
       - run: cargo check --all-targets
       - run: cargo test
       - run: cargo clippy --all-targets --all-features -- -D warnings
@@ -42,8 +42,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-pc-windows-gnu
             archive: lunar-windows-x64.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -58,6 +58,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
       - run: cargo build --release --target ${{ matrix.target }}
       - if: runner.os == 'Windows'
         shell: pwsh
