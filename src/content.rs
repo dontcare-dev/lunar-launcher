@@ -12,9 +12,7 @@ pub struct Project {
     pub slug: String,
     pub title: String,
     pub description: String,
-    pub project_type: String,
     pub downloads: u64,
-    pub icon_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -103,7 +101,7 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
         let entry_name = entry.name().to_owned();
-        if let Some(relative) = entry_name.strip_prefix("overrides/") {
+        if let Some(relative) = entry_name.strip_prefix("overrides/").filter(|relative| !relative.is_empty()) {
             let destination = instance.join(safe_relative(relative)?);
             if entry.is_dir() { fs::create_dir_all(destination)?; }
             else {
@@ -155,10 +153,3 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     install_modpack_bytes(&bytes, root)
 }
 
-pub fn import_resource_pack(source: &Path, root: &Path) -> Result<String> {
-    let filename = source.file_name().context("Resource-pack filename is invalid")?;
-    let destination = root.join("resourcepacks").join(filename);
-    fs::create_dir_all(destination.parent().context("Resource-pack directory is invalid")?)?;
-    fs::copy(source, &destination)?;
-    Ok(destination.display().to_string())
-}
