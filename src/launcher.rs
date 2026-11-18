@@ -678,6 +678,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn removes_only_completed_versions() {
+        let root = std::env::temp_dir().join(format!("lunar-version-test-{}", std::process::id()));
+        let version = root.join("versions").join("1.21.1");
+        fs::create_dir_all(&version).unwrap();
+        fs::write(version.join(".lunar-installed"), b"1.21.1").unwrap();
+        remove_version("1.21.1", &root).unwrap();
+        assert!(!version.exists());
+        assert!(remove_version("../outside", &root).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn parses_java_runtime_versions() {
         assert_eq!(parse_java_major("openjdk version \"21.0.4\" 2024-07-16"), Some(21));
         assert_eq!(parse_java_major("java version \"1.8.0_412\""), Some(8));
