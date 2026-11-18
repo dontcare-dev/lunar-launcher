@@ -33,8 +33,18 @@ pub fn save(servers: &[SavedServer]) -> Result<()> {
     let path = path().context("Could not locate the LUNAR configuration directory")?;
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
     let temporary = path.with_extension("tmp");
+    let backup = path.with_extension("bak");
     std::fs::write(&temporary, serde_json::to_vec_pretty(servers)?)?;
-    std::fs::rename(temporary, path)?;
+    let had_previous = path.exists();
+    if had_previous {
+        let _ = std::fs::remove_file(&backup);
+        std::fs::rename(&path, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(&temporary, &path) {
+        if had_previous { let _ = std::fs::rename(&backup, &path); }
+        return Err(error.into());
+    }
+    if had_previous { let _ = std::fs::remove_file(backup); }
     Ok(())
 }
 
@@ -88,17 +98,23 @@ fn flatten_text(value: &Value) -> String {
 }
 
 pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
-    let address = if server.address.contains(':') { server.address.clone() } else { format!("{}:25565", server.address) };
+    let (host, port) = if let Some(rest) = server.address.strip_prefix('[') {
+        let (host, suffix) = rest.split_once(']').context("Invalid IPv6 server address")?;
+        let port = suffix.strip_prefix(':').map(str::parse).transpose()?.unwrap_or(25565);
+        (host.to_owned(), port)
+    } else if let Some((host, port)) = server.address.rsplit_once(':') {
+        if !host.contains(':') { (host.to_owned(), port.parse()?) } else { (server.address.clone(), 25565) }
+    } else { (server.address.clone(), 25565) };
+    let address = format!("{host}:{port}");
     let socket = address.to_socket_addrs()?.next().context("Server address did not resolve")?;
     let started = Instant::now();
     let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(4)).context("Connection timed out")?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-    let host = server.address.split(':').next().unwrap_or(&server.address);
     let mut handshake = vec![0, 0xff, 0xff, 0xff, 0xff, 0x0f];
     handshake.extend(varint(host.len() as i32));
     handshake.extend(host.as_bytes());
-    handshake.extend(25565_u16.to_be_bytes());
+    handshake.extend(port.to_be_bytes());
     handshake.push(1);
     stream.write_all(&packet(&handshake))?;
     stream.write_all(&[1, 0])?;

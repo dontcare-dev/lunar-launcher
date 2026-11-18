@@ -69,6 +69,8 @@ enum Screen {
     Servers,
 }
 
+type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
+
 pub struct LunarApp {
     profiles: ProfileStore,
     screen: Screen,
@@ -105,19 +107,26 @@ pub struct LunarApp {
     server_name: String,
     server_address: String,
     server_statuses: std::collections::BTreeMap<String, crate::server::ServerStatus>,
-    server_rx: Option<Receiver<Vec<(String, Result<crate::server::ServerStatus, String>)>>>,
+    server_rx: Option<Receiver<ServerPingResults>>,
 }
 
 impl LunarApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals.dark_mode = true;
-        style.visuals.window_fill = Color32::from_rgb(17, 20, 28);
-        style.visuals.panel_fill = Color32::from_rgb(13, 16, 23);
-        style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(23, 27, 37);
-        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(29, 34, 46);
-        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(47, 57, 75);
-        style.visuals.widgets.active.bg_fill = Color32::from_rgb(77, 112, 180);
+        style.visuals.window_fill = Color32::from_rgb(8, 10, 16);
+        style.visuals.panel_fill = Color32::from_rgb(10, 13, 21);
+        style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(18, 22, 33);
+        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(24, 29, 43);
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(39, 49, 70);
+        style.visuals.widgets.active.bg_fill = Color32::from_rgb(91, 116, 190);
+        style.visuals.window_corner_radius = egui::CornerRadius::same(16);
+        style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.selection.bg_fill = Color32::from_rgb(75, 98, 160);
+        style.spacing.button_padding = Vec2::new(15.0, 9.0);
         style.spacing.item_spacing = Vec2::new(12.0, 12.0);
         cc.egui_ctx.set_style(style);
 
@@ -137,7 +146,7 @@ impl LunarApp {
             version_filter: String::new(),
             snapshots: preferences.snapshots,
             status: "Ready".into(),
-            accent: Color32::from_rgb(137, 169, 232),
+            accent: Color32::from_rgb(151, 169, 255),
             game_root: game_root.clone(),
             installed_ids,
             installed_version: None,
@@ -334,9 +343,9 @@ impl LunarApp {
 
     fn sidebar(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("lunar_navigation")
-            .exact_width(206.0)
+            .exact_width(218.0)
             .resizable(false)
-            .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::same(18)))
+            .frame(egui::Frame::new().fill(Color32::from_rgb(9, 12, 19)).inner_margin(egui::Margin::same(18)))
             .show(ctx, |ui| {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
@@ -961,7 +970,7 @@ impl eframe::App for LunarApp {
                 });
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::from_rgb(17, 20, 28)).inner_margin(egui::Margin::same(30)))
+            .frame(egui::Frame::new().fill(Color32::from_rgb(10, 13, 21)).inner_margin(egui::Margin::same(30)))
             .show(ctx, |ui| {
                 match self.screen {
                     Screen::Home => self.home(ui),
