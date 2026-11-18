@@ -940,7 +940,8 @@ impl eframe::App for LunarApp {
                 self.server_statuses.insert(address, result.unwrap_or_else(|_| crate::server::ServerStatus::default()));
             }
             self.server_rx = None;
-        }\n        if self.content_search_rx.is_some()
+        }
+        if self.content_search_rx.is_some()
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
