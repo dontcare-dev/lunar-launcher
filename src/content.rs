@@ -148,8 +148,8 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let version = versions.first().context("No modpack version was found")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The modpack version contains no file")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1")) {
-        if !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Modpack checksum verification failed"); }
+    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected) { bail!("Modpack checksum verification failed"); }
     }
     install_modpack_bytes(&bytes, root)
 }

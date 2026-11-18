@@ -797,34 +797,73 @@ impl eframe::App for LunarApp {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
         if let Some(rx) = &self.content_search_rx
-            && let Ok(result) = rx.try_recv() {
-                match result { Ok(items) => { self.content_results = items; self.status = format!("Found {} projects", self.content_results.len()); }, Err(error) => self.status = error }
-                self.content_search_rx = None;
-                self.content_busy = false;
-        if let Some(rx) = &self.content_install_rx
-            && let Ok(result) = rx.try_recv() {
-                match result { Ok(path) => { self.status = format!("Installed to {path}"); self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default(); }, Err(error) => self.status = error }
-                self.content_install_rx = None;
-                self.content_busy = false;
-        if let Some(rx) = &self.java_install_rx
-            && let Ok(result) = rx.try_recv() {
-                self.java_install_rx = None;
-                match result { Ok(path) => { self.java_status = format!("Managed runtime: {path}"); self.status = "Java installation complete".into(); }, Err(error) => self.status = error }
-        if let Some(rx) = &self.modpack_launch_rx
-            && let Ok(result) = rx.try_recv() {
-                self.modpack_launch_rx = None;
-                match result {
-                    Ok(installed) => {
-                        if let Some(profile) = self.profiles.profiles.iter().find(|p| Some(p.name.as_str()) == self.profiles.selected.as_deref()) {
-                            match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
-                                Ok(process) => { self.game_process = Some(process); self.status = format!("Launching {}", installed.id); }
-                                Err(error) => self.status = format!("{error:#}"),
-                            }
-                        } else { self.status = "Select an offline profile first".into(); }
-                    }
-                    Err(error) => self.status = error,
+            && let Ok(result) = rx.try_recv()
+        {
+            match result {
+                Ok(items) => {
+                    self.content_results = items;
+                    self.status = format!("Found {} projects", self.content_results.len());
                 }
-        if self.content_search_rx.is_some() || self.content_install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(150)); }
+                Err(error) => self.status = error,
+            }
+            self.content_search_rx = None;
+            self.content_busy = false;
+        }
+        if let Some(rx) = &self.content_install_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            match result {
+                Ok(path) => {
+                    self.status = format!("Installed to {path}");
+                    self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default();
+                }
+                Err(error) => self.status = error,
+            }
+            self.content_install_rx = None;
+            self.content_busy = false;
+        }
+        if let Some(rx) = &self.java_install_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.java_install_rx = None;
+            match result {
+                Ok(path) => {
+                    self.java_status = format!("Managed runtime: {path}");
+                    self.status = "Java installation complete".into();
+                }
+                Err(error) => self.status = error,
+            }
+        }
+        if let Some(rx) = &self.modpack_launch_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.modpack_launch_rx = None;
+            match result {
+                Ok(installed) => {
+                    if let Some(profile) = self.profiles.profiles.iter().find(|profile| {
+                        Some(profile.name.as_str()) == self.profiles.selected.as_deref()
+                    }) {
+                        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
+                            Ok(process) => {
+                                self.game_process = Some(process);
+                                self.status = format!("Launching {}", installed.id);
+                            }
+                            Err(error) => self.status = format!("{error:#}"),
+                        }
+                    } else {
+                        self.status = "Select an offline profile first".into();
+                    }
+                }
+                Err(error) => self.status = error,
+            }
+        }
+        if self.content_search_rx.is_some()
+            || self.content_install_rx.is_some()
+            || self.modpack_launch_rx.is_some()
+            || self.java_install_rx.is_some()
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))
