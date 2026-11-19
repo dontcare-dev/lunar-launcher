@@ -1159,7 +1159,7 @@ impl LunarApp {
             ui.label(RichText::new("Choose any local GIF. Its frame timing is preserved so the background animation stays in sync, behind the transparent panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
             ui.add_space(8.0);
             if !self.background_gif.is_empty() {
-                let selected_name = PathBuf::from(&self.background_gif).file_name().and_then(|name| name.to_str()).unwrap_or("Selected GIF");
+                let selected_name = PathBuf::from(&self.background_gif).file_name().and_then(|name| name.to_str()).map(str::to_owned).unwrap_or_else(|| "Selected GIF".to_owned());
                 ui.label(RichText::new(format!("Selected: {selected_name}")).size(11.0).color(Color32::from_rgb(183, 196, 225)));
             }
             if !self.background_frames.is_empty() {
