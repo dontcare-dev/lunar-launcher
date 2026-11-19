@@ -15,7 +15,7 @@ shlex = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 directories = "6"
 egui_extras = { version = "0.31", features = ["svg"] }
-image = { version = "0.25", default-features = false, features = ["gif"] }
+image = { version = "0.25", default-features = false, features = ["gif", "png", "jpeg", "webp"] }
 
 [profile.release]
 opt-level = 3
