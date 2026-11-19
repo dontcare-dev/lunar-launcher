@@ -152,7 +152,7 @@ impl LunarApp {
 
         let game_root = launcher::game_directory().unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(".lunar-data"));
         let installed_ids = launcher::installed_versions(&game_root).unwrap_or_default();
-        let java_status = launcher::detect_java().unwrap_or_else(|error| error.to_string());
+        let java_status = launcher::detect_java().unwrap_or_else(|_| "No system Java found. Lunar will download the compatible runtime automatically when Minecraft launches.".into());
         let preferences = LauncherPreferences::load();
         let mut app = Self {
             profiles: ProfileStore::load(),
@@ -765,6 +765,7 @@ impl LunarApp {
         ui.group(|ui| {
             ui.label(RichText::new("JAVA RUNTIME").size(10.0).color(Color32::GRAY).strong());
             ui.label(&self.java_status);
+            ui.label(RichText::new("Lunar installs a compatible Java runtime automatically if one is missing.").size(10.0).color(Color32::GRAY));
             ui.label(RichText::new(format!("Game data: {}", self.game_root.display())).size(10.0).color(Color32::GRAY));
         });
     }
@@ -1136,6 +1137,45 @@ impl LunarApp {
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Make Lunar Launcher feel like yours.");
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                Self::svg_icon(ui, "bytes://lunar-image.svg", include_bytes!("../assets/icons/image.svg"), 20.0);
+                ui.label(RichText::new("ADD BACKGROUND GIF").strong());
+            });
+            ui.label(RichText::new("Choose any local GIF. Its frame timing is preserved so the background animation stays in sync, behind the transparent panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
+            ui.add_space(8.0);
+            if !self.background_gif.is_empty() {
+                let selected_name = PathBuf::from(&self.background_gif).file_name().and_then(|name| name.to_str()).map(str::to_owned).unwrap_or_else(|| "Selected GIF".to_owned());
+                ui.label(RichText::new(format!("Selected: {selected_name}")).size(11.0).color(Color32::from_rgb(183, 196, 225)));
+            }
+            if !self.background_frames.is_empty() {
+                ui.label(RichText::new(format!("{} animation frames loaded", self.background_frames.len())).size(10.0).color(Color32::GRAY));
+            }
+            ui.horizontal(|ui| {
+                let field_width = (ui.available_width() - 116.0).max(120.0);
+                ui.add_sized([field_width, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
+                if ui.button("Choose GIF").clicked() && let Some(path) = Self::choose_gif_file() {
+                    self.background_gif = path;
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Apply background").clicked() && !self.background_gif.trim().is_empty() {
+                    self.load_background_gif(self.background_gif.trim().to_owned());
+                }
+                if ui.button("Remove background").clicked() {
+                    self.background_gif.clear();
+                    self.background_frames.clear();
+                    self.background_texture = None;
+                    self.background_rx = None;
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+                    self.status = "Animated background removed".into();
+                }
+            });
+            if self.background_rx.is_some() {
+                ui.horizontal(|ui| { ui.spinner(); ui.label("Preparing blurred animation…"); });
+            }
+        });
+        ui.add_space(10.0);
         let previous_memory = self.memory_mb;
         let previous_performance = self.performance_mode.clone();
         ui.group(|ui| {
@@ -1150,6 +1190,7 @@ impl LunarApp {
         ui.group(|ui| {
             ui.label(RichText::new("JAVA RUNTIME").strong());
             ui.label(&self.java_status);
+            ui.label(RichText::new("You do not need to install Java separately. Lunar manages the correct runtime for each Minecraft version when you launch.").size(11.0).color(Color32::from_rgb(166, 176, 197)));
             ui.horizontal(|ui| {
                 for major in [8_u32, 17, 21] {
                     if ui.add_enabled(self.java_install_rx.is_none(), egui::Button::new(format!("Install Java {major}"))).clicked() {
@@ -1236,44 +1277,6 @@ impl LunarApp {
             }
         });
         ui.add_space(12.0);
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                Self::svg_icon(ui, "bytes://lunar-image.svg", include_bytes!("../assets/icons/image.svg"), 20.0);
-                ui.label(RichText::new("ADD BACKGROUND GIF").strong());
-            });
-            ui.label(RichText::new("Choose any local GIF. Its frame timing is preserved so the background animation stays in sync, behind the transparent panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
-            ui.add_space(8.0);
-            if !self.background_gif.is_empty() {
-                let selected_name = PathBuf::from(&self.background_gif).file_name().and_then(|name| name.to_str()).map(str::to_owned).unwrap_or_else(|| "Selected GIF".to_owned());
-                ui.label(RichText::new(format!("Selected: {selected_name}")).size(11.0).color(Color32::from_rgb(183, 196, 225)));
-            }
-            if !self.background_frames.is_empty() {
-                ui.label(RichText::new(format!("{} animation frames loaded", self.background_frames.len())).size(10.0).color(Color32::GRAY));
-            }
-            ui.horizontal(|ui| {
-                let field_width = (ui.available_width() - 116.0).max(120.0);
-                ui.add_sized([field_width, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
-                if ui.button("Choose GIF").clicked() && let Some(path) = Self::choose_gif_file() {
-                    self.background_gif = path;
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Apply background").clicked() && !self.background_gif.trim().is_empty() {
-                    self.load_background_gif(self.background_gif.trim().to_owned());
-                }
-                if ui.button("Remove background").clicked() {
-                    self.background_gif.clear();
-                    self.background_frames.clear();
-                    self.background_texture = None;
-                    self.background_rx = None;
-                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
-                    self.status = "Animated background removed".into();
-                }
-            });
-            if self.background_rx.is_some() {
-                ui.horizontal(|ui| { ui.spinner(); ui.label("Preparing blurred animation…"); });
-            }
-        });
     }
 }
 
@@ -1385,15 +1388,21 @@ impl eframe::App for LunarApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::TRANSPARENT).inner_margin(egui::Margin::same(30)))
             .show(ctx, |ui| {
-                match self.screen {
-                    Screen::Home => self.home(ui),
-                    Screen::Play => self.play(ui),
-                    Screen::Versions => self.versions(ui),
-                    Screen::Profiles => self.profiles(ui),
-                    Screen::Content => self.content(ui),
-                    Screen::Servers => self.servers(ui),
-                    Screen::Settings => self.settings(ui),
-                }
+                egui::ScrollArea::vertical()
+                    .id_salt("lunar_main_content_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        match self.screen {
+                            Screen::Home => self.home(ui),
+                            Screen::Play => self.play(ui),
+                            Screen::Versions => self.versions(ui),
+                            Screen::Profiles => self.profiles(ui),
+                            Screen::Content => self.content(ui),
+                            Screen::Servers => self.servers(ui),
+                            Screen::Settings => self.settings(ui),
+                        }
+                    });
             });
         self.paint_splash(ctx);
     }
