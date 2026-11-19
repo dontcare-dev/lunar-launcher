@@ -2,7 +2,7 @@ use anyhow::Context;
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
-use std::{fs, io::BufReader, path::PathBuf, process::{Child, Command}, sync::{mpsc::{self, Receiver, TryRecvError}}, time::{Duration, Instant}};
+use std::{fs, io::BufReader, path::PathBuf, process::{Child, Command}, sync::{mpsc::{self, Receiver, TryRecvError}}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -75,6 +75,7 @@ enum Screen {
     Content,
     Servers,
     Workspace,
+    PlayStats,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -140,6 +141,13 @@ pub struct LunarApp {
     workspace_results: Vec<String>,
     workspace_section: String,
     workspace_preview: Option<String>,
+    world_rename_target: Option<String>,
+    world_rename_value: String,
+    play_stats: crate::stats::PlayStats,
+    session_started_at: Option<Instant>,
+    session_started_epoch: u64,
+    session_version: String,
+    session_instance: Option<String>,
     screenshot_textures: std::collections::BTreeMap<String, egui::TextureHandle>,
     download_manager: crate::downloads::DownloadManager,
     download_url: String,
@@ -231,6 +239,13 @@ impl LunarApp {
             workspace_results: Vec::new(),
             workspace_section: "Overview".into(),
             workspace_preview: None,
+            world_rename_target: None,
+            world_rename_value: String::new(),
+            play_stats: crate::stats::PlayStats::load(),
+            session_started_at: None,
+            session_started_epoch: 0,
+            session_version: String::new(),
+            session_instance: None,
             screenshot_textures: std::collections::BTreeMap::new(),
             download_manager: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
@@ -511,11 +526,13 @@ impl LunarApp {
             Some(Ok(Some(status))) => {
                 self.status = format!("Minecraft exited with {status}");
                 self.game_process = None;
+                self.finish_play_session();
             }
             Some(Ok(None)) => self.status = "Minecraft is running".into(),
             Some(Err(error)) => {
                 self.status = format!("Could not read Minecraft process: {error}");
                 self.game_process = None;
+                self.finish_play_session();
             }
             None => {}
         }
@@ -524,10 +541,33 @@ impl LunarApp {
         }
     }
 
+    fn begin_play_session(&mut self, version: String, instance: Option<String>) {
+        self.session_started_at = Some(Instant::now());
+        self.session_started_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        self.session_version = version;
+        self.session_instance = instance;
+    }
+
+    fn finish_play_session(&mut self) {
+        if let Some(started) = self.session_started_at.take() {
+            if let Err(error) = self.play_stats.record(
+                self.session_version.clone(),
+                self.session_instance.take(),
+                self.session_started_epoch,
+                started.elapsed().as_secs(),
+            ) {
+                self.status = format!("Could not save play stats: {error}");
+            }
+        }
+        self.session_version.clear();
+        self.session_started_epoch = 0;
+    }
+
     fn stop_game(&mut self) {
         if let Some(mut process) = self.game_process.take() {
             let _ = process.kill();
             let _ = process.wait();
+            self.finish_play_session();
             self.status = "Minecraft stopped".into();
         }
     }
@@ -570,8 +610,9 @@ impl LunarApp {
         }
         match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
             Ok(process) => {
-                self.installed_version = Some(installed);
+                self.installed_version = Some(installed.clone());
                 self.game_process = Some(process);
+                self.begin_play_session(installed.id.clone(), None);
                 self.status = "Minecraft is running".into();
             }
             Err(error) => self.status = format!("{error:#}"),
@@ -638,6 +679,7 @@ impl LunarApp {
                     let navigation: [NavigationItem; 13] = [
                         ("Home", Screen::Home, None, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, None, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
+                        ("Play Stats", Screen::PlayStats, None, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
                         ("Versions", Screen::Versions, None, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
                         ("Profiles", Screen::Profiles, None, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                         ("Content", Screen::Content, None, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
@@ -1475,7 +1517,13 @@ impl LunarApp {
                                 Ok(mut installed) => {
                                     installed.game_directory = Some(path.clone());
                                     match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode, item.java_major) {
-                                        Ok(process) => { self.game_process = Some(process); if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); } self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Launching {}", item.name); }
+                                        Ok(process) => {
+                                            self.game_process = Some(process);
+                                            self.begin_play_session(item.minecraft.clone(), Some(item.name.clone()));
+                                            if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); }
+                                            self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                                            self.status = format!("Launching {}", item.name);
+                                        }
                                         Err(error) => self.status = format!("{error:#}"),
                                     }
                                 }
@@ -1579,19 +1627,91 @@ impl LunarApp {
             }
             "Worlds & Backups" => {
                 let saves = path.join("saves");
-                let worlds = fs::read_dir(&saves).ok().into_iter().flatten().filter_map(|entry| entry.ok()).filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir())).collect::<Vec<_>>();
-                ui.label(RichText::new("WORLD BACKUPS").strong());
-                for world in worlds {
-                    let name = world.file_name().to_string_lossy().to_string();
-                    ui.horizontal(|ui| { ui.label(name.clone()); if ui.button("Back up").clicked() { match crate::workspace::backup_world(&path, &name) { Ok(archive) => self.status = format!("Backup created: {}", archive.display()), Err(error) => self.status = error.to_string() } } });
-                }
+                let worlds = crate::workspace::list_worlds(&path).unwrap_or_default();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(format!("{} worlds", worlds.len())).strong().size(18.0));
+                    if ui.button("Refresh").clicked() { self.workspace_preview = None; }
+                    if ui.button("Open worlds folder").clicked() { self.open_local_path(saves.clone()); }
+                    if ui.button("Import world backup").clicked() && let Some(source) = Self::choose_content_file("shader") {
+                        match crate::workspace::restore_world(&source, &path) {
+                            Ok(message) => self.status = message,
+                            Err(error) => self.status = format!("World import failed: {error}"),
+                        }
+                    }
+                });
+                ui.label(RichText::new("Manage saves for this instance. Rename, duplicate, back up, restore or remove worlds without touching other instances.").size(11.0).color(Color32::GRAY));
                 ui.add_space(8.0);
-                ui.label(RichText::new("RESTORE BACKUP").strong());
+                if worlds.is_empty() {
+                    ui.group(|ui| { ui.label(RichText::new("No worlds found").strong()); ui.label("Create a world in Minecraft and it will appear here."); });
+                }
+                for (name, size, modified) in worlds {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&name).strong());
+                                ui.label(RichText::new(format!("{:.1} MB · {}", size as f64 / 1_048_576.0, if modified == 0 { "Unknown date".into() } else { crate::stats::format_timestamp(modified) })).size(10.0).color(Color32::GRAY));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.small_button("Delete").clicked() { self.world_rename_target = Some(format!("delete:{name}")); }
+                                if ui.small_button("Duplicate").clicked() {
+                                    let mut duplicate = format!("{name} Copy");
+                                    let mut suffix = 2;
+                                    while saves.join(&duplicate).exists() { duplicate = format!("{name} Copy {suffix}"); suffix += 1; }
+                                    match crate::workspace::duplicate_world(&path, &name, &duplicate) {
+                                        Ok(()) => self.status = format!("Duplicated world as {duplicate}"),
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
+                                if ui.small_button("Back up").clicked() {
+                                    match crate::workspace::backup_world(&path, &name) {
+                                        Ok(archive) => self.status = format!("World backup created: {}", archive.display()),
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
+                                if ui.small_button("Rename").clicked() {
+                                    self.world_rename_target = Some(name.clone());
+                                    self.world_rename_value = name.clone();
+                                }
+                            });
+                        });
+                        if self.world_rename_target.as_deref() == Some(name.as_str()) {
+                            ui.horizontal(|ui| {
+                                ui.text_edit_singleline(&mut self.world_rename_value);
+                                if ui.small_button("Save").clicked() {
+                                    match crate::workspace::rename_world(&path, &name, &self.world_rename_value) {
+                                        Ok(()) => { self.status = format!("Renamed world to {}", self.world_rename_value); self.world_rename_target = None; }
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
+                                if ui.small_button("Cancel").clicked() { self.world_rename_target = None; }
+                            });
+                        }
+                        if self.world_rename_target.as_deref() == Some(format!("delete:{name}").as_str()) {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Permanently delete this world?").color(Color32::from_rgb(255, 150, 150)));
+                                if ui.small_button("Confirm delete").clicked() {
+                                    match crate::workspace::delete_world(&path, &name) {
+                                        Ok(()) => { self.status = format!("Deleted world {name}"); self.world_rename_target = None; }
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
+                                if ui.small_button("Cancel").clicked() { self.world_rename_target = None; }
+                            });
+                        }
+                    });
+                }
+                ui.add_space(10.0);
+                ui.label(RichText::new("WORLD BACKUPS").strong());
                 for backup in crate::workspace::list_files(&path.join("backups"), &["zip"]).unwrap_or_default() {
                     let name = backup.file_name().and_then(|value| value.to_str()).unwrap_or("backup").to_owned();
-                    ui.horizontal(|ui| { ui.label(name); if ui.button("Restore").clicked() { match crate::workspace::restore_world(&backup, &path) { Ok(message) => self.status = message, Err(error) => self.status = error.to_string() } } });
+                    ui.horizontal(|ui| {
+                        ui.label(name);
+                        if ui.button("Restore").clicked() {
+                            match crate::workspace::restore_world(&backup, &path) { Ok(message) => self.status = message, Err(error) => self.status = error.to_string() }
+                        }
+                        if ui.small_button("Open").clicked() { self.open_local_path(backup.clone()); }
+                    });
                 }
-                if ui.button("Open saves folder").clicked() { self.open_local_path(saves); }
             }
             "Screenshots" => {
                 let shots = crate::workspace::list_files(&path.join("screenshots"), &["png", "jpg", "jpeg"]).unwrap_or_default();
@@ -1789,6 +1909,63 @@ impl LunarApp {
                 for result in self.workspace_results.clone() { ui.label(result); }
             }
             _ => {}
+        }
+    }
+
+    fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Play Stats", "Your Minecraft play history across Lunar Launcher.");
+        let total = self.play_stats.total_playtime_seconds;
+        let average = if self.play_stats.total_launches == 0 { 0 } else { total / self.play_stats.total_launches };
+        ui.horizontal_wrapped(|ui| {
+            for (label, value) in [
+                ("TOTAL PLAYTIME", crate::stats::format_duration(total)),
+                ("SESSIONS", self.play_stats.total_launches.to_string()),
+                ("AVERAGE SESSION", crate::stats::format_duration(average)),
+                ("LAST PLAYED", self.play_stats.last_played.map(crate::stats::format_timestamp).unwrap_or_else(|| "Never".into())),
+            ] {
+                ui.group(|ui| {
+                    ui.label(RichText::new(label).size(10.0).color(Color32::GRAY));
+                    ui.label(RichText::new(value).size(22.0).strong());
+                });
+            }
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("PLAYTIME BY VERSION").strong());
+            if ui.button("Refresh").clicked() { self.play_stats = crate::stats::PlayStats::load(); }
+        });
+        let mut versions = self.play_stats.version_playtime.iter().collect::<Vec<_>>();
+        versions.sort_by(|a, b| b.1.cmp(a.1));
+        if versions.is_empty() {
+            ui.label(RichText::new("No completed play sessions yet. Launch Minecraft through Lunar and your stats will appear here.").color(Color32::GRAY));
+        } else {
+            let max = versions.first().map(|(_, seconds)| **seconds).unwrap_or(1).max(1) as f32;
+            for (version, seconds) in versions {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(version).strong().size(12.0));
+                    ui.add(egui::ProgressBar::new(*seconds as f32 / max).desired_width(220.0).text(crate::stats::format_duration(*seconds)));
+                });
+            }
+        }
+        ui.add_space(14.0);
+        ui.label(RichText::new("RECENT SESSIONS").strong());
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+            for session in &self.play_stats.recent_sessions {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&session.version).strong());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(RichText::new(crate::stats::format_duration(session.duration_seconds)).strong().color(self.accent));
+                        });
+                    });
+                    ui.label(RichText::new(format!("{} · {}", session.instance.as_deref().unwrap_or("Global game folder"), crate::stats::format_timestamp(session.ended_at))).size(10.0).color(Color32::GRAY));
+                });
+            }
+        });
+        ui.add_space(8.0);
+        if ui.button("Clear play history").clicked() {
+            self.play_stats = crate::stats::PlayStats::default();
+            match self.play_stats.save() { Ok(()) => self.status = "Play history cleared".into(), Err(error) => self.status = error.to_string() }
         }
     }
 
@@ -2076,6 +2253,7 @@ impl eframe::App for LunarApp {
                         match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
                             Ok(process) => {
                                 self.game_process = Some(process);
+                                self.begin_play_session(installed.id.clone(), None);
                                 self.status = format!("Launching {}", installed.id);
                             }
                             Err(error) => self.status = format!("{error:#}"),
@@ -2132,6 +2310,7 @@ impl eframe::App for LunarApp {
                             Screen::Content => self.content(ui),
                             Screen::Servers => self.servers(ui),
                             Screen::Workspace => self.workspace(ui),
+                            Screen::PlayStats => self.play_stats_ui(ui),
                             Screen::Settings => self.settings(ui),
                         }
                     });
