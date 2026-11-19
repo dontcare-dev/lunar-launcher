@@ -248,15 +248,14 @@ impl LunarApp {
                 }
                 let file = fs::File::open(&path).map_err(|error| error.to_string())?;
                 let decoder = GifDecoder::new(BufReader::new(file)).map_err(|error| error.to_string())?;
-                let decoded = decoder.into_frames().collect_frames().map_err(|error| error.to_string())?;
-                let decoded = decoded.into_iter().take(48).collect::<Vec<_>>();
+                let decoded = decoder.into_frames().take(48).collect::<std::result::Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
                 if decoded.is_empty() {
                     return Err("The selected GIF contains no frames".into());
                 }
                 let mut frames = Vec::with_capacity(decoded.len());
                 for frame in decoded {
                     let delay = frame.delay().numer_denom_ms();
-                    let delay_ms = (delay.0 / delay.1.max(1)).clamp(60, 1200) as u64;
+                    let delay_ms = ((delay.0 as f64 / delay.1.max(1) as f64).round() as u64).clamp(20, 1200);
                     let mut image = frame.into_buffer();
                     let (width, height) = image.dimensions();
                     let scale = (960.0_f32 / width as f32).min(540.0_f32 / height as f32).min(1.0);
@@ -321,7 +320,8 @@ impl LunarApp {
                     self.background_next = Instant::now() + Duration::from_millis(*delay);
                 }
             }
-            ctx.request_repaint_after(Duration::from_millis(35));
+            let until_next_frame = self.background_next.saturating_duration_since(Instant::now());
+            ctx.request_repaint_after(until_next_frame.max(Duration::from_millis(1)));
         }
         if self.background_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -1156,12 +1156,19 @@ impl LunarApp {
                 Self::svg_icon(ui, "bytes://lunar-image.svg", include_bytes!("../assets/icons/image.svg"), 20.0);
                 ui.label(RichText::new("AMBIENT BACKGROUND").strong());
             });
-            ui.label(RichText::new("Use a local GIF as the full-window animated backdrop. LUNAR softens and darkens it behind the glass panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
+            ui.label(RichText::new("Choose any local GIF. Its frame timing is preserved so the background animation stays in sync, behind the transparent panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
             ui.add_space(8.0);
+            if !self.background_gif.is_empty() {
+                let selected_name = PathBuf::from(&self.background_gif).file_name().and_then(|name| name.to_str()).unwrap_or("Selected GIF");
+                ui.label(RichText::new(format!("Selected: {selected_name}")).size(11.0).color(Color32::from_rgb(183, 196, 225)));
+            }
+            if !self.background_frames.is_empty() {
+                ui.label(RichText::new(format!("{} animation frames loaded", self.background_frames.len())).size(10.0).color(Color32::GRAY));
+            }
             ui.horizontal(|ui| {
                 let field_width = (ui.available_width() - 116.0).max(120.0);
                 ui.add_sized([field_width, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
-                if ui.button("Browse").clicked() && let Some(path) = Self::choose_gif_file() {
+                if ui.button("Choose GIF").clicked() && let Some(path) = Self::choose_gif_file() {
                     self.background_gif = path;
                 }
             });
