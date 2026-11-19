@@ -52,15 +52,15 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y mingw-w64 libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
       - run: cargo build --release
       - run: cargo build --release --target x86_64-pc-windows-gnu
-      - run: cp target/release/lunar ../LUNAR-linux-x64
-      - run: cp target/x86_64-pc-windows-gnu/release/lunar.exe ../LUNAR-windows-x64.exe
+      - run: cp target/release/lunar ../Lunar-Launcher-linux-x64
+      - run: cp target/x86_64-pc-windows-gnu/release/lunar.exe ../Lunar-Launcher-Windows-x64.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: LUNAR-Linux
-          path: LUNAR-linux-x64
+          name: Lunar-Launcher-Linux
+          path: Lunar-Launcher-linux-x64
           retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
-          name: LUNAR-Windows
-          path: LUNAR-windows-x64.exe
+          name: Lunar-Launcher-Windows
+          path: Lunar-Launcher-Windows-x64.exe
           retention-days: 14
