@@ -80,7 +80,7 @@ enum Screen {
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
 type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
-type NavigationItem = (&'static str, Screen, Option<&'static str>, &'static str, &'static [u8]);
+type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 
 pub struct LunarApp {
     profiles: ProfileStore,
@@ -673,21 +673,21 @@ impl LunarApp {
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
                     let navigation: [NavigationItem; 13] = [
-                        ("Home", Screen::Home, None, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
-                        ("Play", Screen::Play, None, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
-                        ("Play Stats", Screen::PlayStats, None, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
-                        ("Versions", Screen::Versions, None, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
-                        ("Profiles", Screen::Profiles, None, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
-                        ("Content", Screen::Content, None, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                        ("Live Performance Manager", Screen::LivePerformance, None, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
-                        ("Mod Manager", Screen::Content, None, "bytes://lunar-mods.svg", include_bytes!("../assets/icons/mods.svg")),
-                        ("Resource Packs", Screen::Content, None, "bytes://lunar-packs.svg", include_bytes!("../assets/icons/resource-packs.svg")),
-                        ("Shader Manager", Screen::Content, None, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
-                        ("Launcher Customization", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
-                        ("Servers", Screen::Servers, None, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
-                        ("Settings", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
+                        ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
+                        ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
+                        ("Play Stats", Screen::PlayStats, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
+                        ("Versions", Screen::Versions, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
+                        ("Profiles", Screen::Profiles, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
+                        ("Content", Screen::Content, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Live Performance Manager", Screen::LivePerformance, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
+                        ("Mod Manager", Screen::Content, "bytes://lunar-mods.svg", include_bytes!("../assets/icons/mods.svg")),
+                        ("Resource Packs", Screen::Content, "bytes://lunar-packs.svg", include_bytes!("../assets/icons/resource-packs.svg")),
+                        ("Shader Manager", Screen::Content, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
+                        ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
+                        ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
+                        ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
-                    for (label, screen, section, uri, icon) in navigation {
+                    for (label, screen, uri, icon) in navigation {
                         let category_active = match label {
                             "Mod Manager" => self.content_kind == "mod",
                             "Resource Packs" => self.content_kind == "resourcepack",
@@ -695,9 +695,7 @@ impl LunarApp {
                             "Content" => self.content_kind == "modpack",
                             _ => true,
                         };
-                        let active = self.screen == screen
-                            && section.is_none()
-                            && category_active;
+                        let active = self.screen == screen && category_active;
                         if Self::nav_button(ui, label, active, uri, icon).clicked() {
                             self.screen = screen;
                             match label {
