@@ -676,7 +676,7 @@ impl LunarApp {
                 });
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                    let navigation: [NavigationItem; 13] = [
+                    let navigation: [NavigationItem; 14] = [
                         ("Home", Screen::Home, None, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, None, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                         ("Play Stats", Screen::PlayStats, None, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
