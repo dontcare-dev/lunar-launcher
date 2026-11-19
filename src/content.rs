@@ -95,6 +95,8 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
         bail!("Resource-pack checksum verification failed");
     }
     let directory = root.join("resourcepacks");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(&file.filename);
     fs::write(&destination, bytes)?;
     Ok(destination.display().to_string())
 }
