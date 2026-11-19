@@ -305,33 +305,6 @@ pub fn read_tail(path: &Path, max_lines: usize) -> Result<String> {
     Ok(lines.iter().rev().take(max_lines).copied().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 
-pub fn system_memory_mb() -> Option<(u64, u64)> {
-    #[cfg(target_os = "linux")]
-    {
-        let text = fs::read_to_string("/proc/meminfo").ok()?;
-        let total = text.lines().find(|line| line.starts_with("MemTotal:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()? / 1024;
-        let available = text.lines().find(|line| line.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()? / 1024;
-        return Some((total, available));
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let output = std::process::Command::new("powershell").args(["-NoProfile", "-Command", "$m=Get-CimInstance Win32_OperatingSystem; Write-Output ([math]::Round($m.TotalVisibleMemorySize/1024)); Write-Output ([math]::Round($m.FreePhysicalMemory/1024))"]).output().ok()?;
-        let values = String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| line.trim().parse::<u64>().ok()).collect::<Vec<_>>();
-        if values.len() >= 2 { return Some((values[0], values[1])); }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let total = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
-        let total = String::from_utf8_lossy(&total.stdout).trim().parse::<u64>().ok()? / 1024 / 1024;
-        let page = std::process::Command::new("vm_stat").output().ok()?;
-        let text = String::from_utf8_lossy(&page.stdout);
-        let free = text.lines().filter_map(|line| line.split_whitespace().last()?.trim_end_matches('.').parse::<u64>().ok()).sum::<u64>() * 4096 / 1024 / 1024;
-        return Some((total, free));
-    }
-    #[allow(unreachable_code)]
-    None
-}
-
 pub fn format_time(timestamp: Option<u64>) -> String {
     timestamp.map(|value| format!("{} days ago", now().saturating_sub(value) / 86400)).unwrap_or_else(|| "Never".into())
 }
