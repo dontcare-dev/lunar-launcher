@@ -11,11 +11,12 @@ struct LauncherPreferences {
     background_gif: String,
     performance_mode: String,
     auto_sodium: bool,
+    animations_enabled: bool,
 }
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true, animations_enabled: true }
     }
 }
 
@@ -100,6 +101,9 @@ pub struct LunarApp {
     memory_mb: u32,
     performance_mode: String,
     auto_sodium: bool,
+    animations_enabled: bool,
+    startup_at: Instant,
+    splash_complete: bool,
     game_process: Option<Child>,
     content_kind: String,
     content_query: String,
@@ -173,6 +177,9 @@ impl LunarApp {
             memory_mb: preferences.memory_mb.clamp(2048, 8192),
             performance_mode: preferences.performance_mode.clone(),
             auto_sodium: preferences.auto_sodium,
+            animations_enabled: preferences.animations_enabled,
+            startup_at: Instant::now(),
+            splash_complete: false,
             game_process: None,
             content_kind: "modpack".into(),
             content_query: String::new(),
@@ -235,7 +242,7 @@ impl LunarApp {
             snapshots: self.snapshots,
             background_gif: self.background_gif.clone(),
             performance_mode: self.performance_mode.clone(),
-            auto_sodium: self.auto_sodium,
+            auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled,
         }.save();
         let (tx, rx) = mpsc::channel();
         self.background_rx = Some(rx);
@@ -329,6 +336,19 @@ impl LunarApp {
     }
 
     fn paint_background(&self, ctx: &egui::Context) {
+        let time = ctx.input(|input| input.time);
+        if self.animations_enabled {
+            let rect = ctx.screen_rect();
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            for i in 0..34 {
+                let seed = i as f64;
+                let x = rect.left() + ((seed * 73.7).sin() * 0.5 + 0.5) as f32 * rect.width();
+                let y = rect.top() + (((seed * 1.71 + time * (0.035 + (i % 4) as f64 * 0.009)).cos() * 0.5 + 0.5) as f32) * rect.height();
+                let pulse = ((time * 0.8 + seed).sin() * 0.5 + 0.5) as f32;
+                painter.circle_filled(egui::pos2(x, y), 0.8 + pulse * 1.5, Color32::from_rgba_unmultiplied(174, 194, 255, (22.0 + pulse * 65.0) as u8));
+            }
+            ctx.request_repaint_after(Duration::from_millis(33));
+        }
         let rect = ctx.screen_rect();
         let painter = ctx.layer_painter(egui::LayerId::background());
         if let Some(texture) = &self.background_texture {
@@ -348,6 +368,36 @@ impl LunarApp {
             egui::Image::from_bytes(uri, data.to_vec())
                 .fit_to_exact_size(Vec2::splat(size)),
         );
+    }
+
+    fn paint_splash(&mut self, ctx: &egui::Context) {
+        if self.splash_complete {
+            return;
+        }
+        let elapsed = self.startup_at.elapsed().as_secs_f32();
+        if elapsed >= 2.65 {
+            self.splash_complete = true;
+            return;
+        }
+        let rect = ctx.screen_rect();
+        let painter = ctx.layer_painter(egui::LayerId::foreground());
+        painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(4, 7, 16, 246));
+        let center = rect.center();
+        let pulse = (elapsed * 2.4).sin() * 0.5 + 0.5;
+        let reveal = (elapsed / 0.75).clamp(0.0, 1.0);
+        painter.circle_filled(center, 54.0 + pulse * 8.0, Color32::from_rgba_unmultiplied(111, 139, 255, 22));
+        painter.circle_stroke(center, 72.0 + pulse * 5.0, Stroke::new(1.2, Color32::from_rgba_unmultiplied(145, 169, 255, 70)));
+        painter.circle_stroke(center, 91.0 + pulse * 7.0, Stroke::new(0.8, Color32::from_rgba_unmultiplied(145, 169, 255, 35)));
+        painter.circle_filled(center + egui::vec2((elapsed * 0.8).cos() * 78.0, (elapsed * 0.8).sin() * 78.0), 3.0, Color32::from_rgb(190, 207, 255));
+        let moon = center + egui::vec2(-15.0, -18.0);
+        painter.circle_filled(moon, 36.0, Color32::from_rgb(174, 195, 255));
+        painter.circle_filled(moon + egui::vec2(18.0, -12.0), 32.0, Color32::from_rgb(7, 11, 23));
+        painter.text(center + egui::vec2(0.0, 116.0), egui::Align2::CENTER_CENTER, "LUNAR LAUNCHER", FontId::proportional(23.0), Color32::WHITE);
+        painter.text(center + egui::vec2(0.0, 148.0), egui::Align2::CENTER_CENTER, "A better way to play", FontId::proportional(12.0), Color32::from_rgb(151, 165, 195));
+        let bar = egui::Rect::from_center_size(center + egui::vec2(0.0, 190.0), egui::vec2(160.0, 3.0));
+        painter.rect_filled(bar, 2.0, Color32::from_rgb(33, 42, 66));
+        painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * reveal, bar.height())), 2.0, Color32::from_rgb(142, 165, 255));
+        ctx.request_repaint_after(Duration::from_millis(16));
     }
 
     fn refresh_versions(&mut self) {
@@ -545,8 +595,8 @@ impl LunarApp {
             .show(ctx, |ui| {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    Self::svg_icon(ui, "bytes://lunar-brand.svg", include_bytes!("../assets/icons/globe.svg"), 28.0);
-                    ui.label(RichText::new("LUNAR").size(21.0).strong());
+                    Self::svg_icon(ui, "bytes://lunar-moon.svg", include_bytes!("../assets/icons/moon.svg"), 34.0);
+                    ui.label(RichText::new("Lunar Launcher").size(21.0).strong());
                 });
                 ui.add_space(34.0);
                 let navigation: [(&str, Screen, &'static str, &'static [u8]); 7] = [
@@ -574,7 +624,7 @@ impl LunarApp {
     }
 
     fn home(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Welcome to LUNAR", "Your Minecraft setup, without the clutter.");
+        Self::heading(ui, "Welcome to Lunar Launcher", "Your Minecraft setup, without the clutter.");
         egui::Frame::new()
             .fill(Color32::from_rgba_unmultiplied(23, 31, 47, 158))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(53, 68, 94)))
@@ -594,6 +644,38 @@ impl LunarApp {
                 });
             });
         ui.add_space(20.0);
+        let featured: Vec<_> = self.content_results.iter().take(4).map(|project| (
+            project.project_id.clone(),
+            project.title.clone(),
+            self.content_images.get(&project.project_id).cloned(),
+        )).collect();
+        if !featured.is_empty() {
+            ui.label(RichText::new("DISCOVER MODPACKS").size(10.0).strong().color(self.accent));
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                for (id, title, texture) in featured {
+                    let response = egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 190))
+                        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(143, 164, 220, 42)))
+                        .corner_radius(egui::CornerRadius::same(13))
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.set_min_width(126.0);
+                            if let Some(texture) = texture {
+                                ui.add(egui::Image::new((texture.id(), Vec2::splat(58.0))));
+                            }
+                            ui.add_space(5.0);
+                            ui.label(RichText::new(title).size(11.0).strong());
+                        }).response;
+                    if response.interact(egui::Sense::click()).clicked() {
+                        self.content_kind = "modpack".into();
+                        self.content_query = id;
+                        self.screen = Screen::Content;
+                    }
+                }
+            });
+            ui.add_space(12.0);
+        }
         let card_style = ui.style().clone();
         ui.columns(2, |columns| {
             egui::Frame::group(&card_style).show(&mut columns[0], |ui| {
@@ -1097,6 +1179,9 @@ impl LunarApp {
             LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
         }
         ui.add_space(10.0);
+        if ui.checkbox(&mut self.animations_enabled, "Enable animated interface and ambient effects").changed() {
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+        }
         ui.group(|ui| {
             ui.label(RichText::new("MINECRAFT PERFORMANCE").strong());
             egui::ComboBox::from_id_salt("lunar_performance_mode")
@@ -1293,7 +1378,7 @@ impl eframe::App for LunarApp {
                     ui.label(RichText::new("●").color(self.accent).size(9.0));
                     ui.label(RichText::new(&self.status).size(11.0).color(Color32::from_rgb(157, 166, 185)));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new("LUNAR 0.1.0").size(10.0).color(Color32::GRAY));
+                        ui.label(RichText::new("Lunar Launcher 0.1.0").size(10.0).color(Color32::GRAY));
                     });
                 });
             });
@@ -1310,5 +1395,6 @@ impl eframe::App for LunarApp {
                     Screen::Settings => self.settings(ui),
                 }
             });
+        self.paint_splash(ctx);
     }
 }
