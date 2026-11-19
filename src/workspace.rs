@@ -481,4 +481,97 @@ mod tests {
         assert_eq!(list_instances(&root).unwrap()[0].name, item.name);
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn automatic_backup_covers_every_world() {
+        let root = std::env::temp_dir().join(format!("lunar-auto-backup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for name in ["Alpha", "Beta"] {
+            fs::create_dir_all(root.join("saves").join(name)).unwrap();
+            fs::write(root.join("saves").join(name).join("level.dat"), name.as_bytes()).unwrap();
+        }
+        let backups = backup_all_worlds(&root).unwrap();
+        assert_eq!(backups.len(), 2);
+        assert!(backups.iter().all(|path| path.is_file()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn automatic_backup_returns_empty_for_no_worlds() {
+        let root = std::env::temp_dir().join(format!("lunar-empty-backup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        assert!(backup_all_worlds(&root).unwrap().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restore_rejects_zip_path_traversal() {
+        let root = std::env::temp_dir().join(format!("lunar-zip-traversal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let archive_path = root.join("malicious.zip");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        writer.start_file("../outside.txt", SimpleFileOptions::default()).unwrap();
+        use std::io::Write;
+        writer.write_all(b"not safe").unwrap();
+        writer.finish().unwrap();
+        assert!(restore_world(&archive_path, &root).is_err());
+        assert!(!root.join("outside.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn instance_archive_round_trips_manifest_and_files() {
+        let root = std::env::temp_dir().join(format!("lunar-instance-archive-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let instance = root.join("source");
+        fs::create_dir_all(instance.join("mods")).unwrap();
+        let item = Instance { id: "source".into(), name: "Source".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: Some("fabric".into()) };
+        save_instance(&root, &item).unwrap();
+        fs::write(instance.join("mods").join("example.jar"), b"mod-data").unwrap();
+        let archive = root.join("source.lunarpack");
+        export_instance(&instance, &archive).unwrap();
+        let imported = import_instance(&archive, &root, "Imported Copy").unwrap();
+        let imported_path = instance_path(&root, &imported);
+        assert_eq!(imported.name, "Imported Copy");
+        assert_eq!(fs::read(imported_path.join("mods").join("example.jar")).unwrap(), b"mod-data");
+        assert_eq!(imported.loader.as_deref(), Some("fabric"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_listing_ignores_folders_without_level_dat() {
+        let root = std::env::temp_dir().join(format!("lunar-world-list-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("saves").join("Valid")).unwrap();
+        fs::write(root.join("saves").join("Valid").join("level.dat"), b"world").unwrap();
+        fs::create_dir_all(root.join("saves").join("NotWorld")).unwrap();
+        assert_eq!(list_worlds(&root).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_export_creates_a_valid_zip() {
+        let root = std::env::temp_dir().join(format!("lunar-world-export-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("saves").join("World")).unwrap();
+        fs::write(root.join("saves").join("World").join("level.dat"), b"world").unwrap();
+        let output = root.join("world.zip");
+        export_world(&root, "World", &output).unwrap();
+        let archive = ZipArchive::new(fs::File::open(output).unwrap()).unwrap();
+        assert!(archive.file_names().any(|name| name == "World/level.dat"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_world_names_are_rejected_for_backup() {
+        let root = std::env::temp_dir().join(format!("lunar-invalid-backup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        assert!(backup_world(&root, "../outside").is_err());
+        assert!(backup_world(&root, "").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
 }
