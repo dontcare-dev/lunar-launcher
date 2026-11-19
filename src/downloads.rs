@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{collections::HashMap, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Arc, Condvar, Mutex, mpsc::{self, Receiver, Sender}}};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
