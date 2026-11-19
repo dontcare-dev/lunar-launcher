@@ -100,6 +100,7 @@ pub struct LunarApp {
     content_kind: String,
     content_query: String,
     content_results: Vec<crate::content::Project>,
+    content_images: std::collections::BTreeMap<String, egui::TextureHandle>,
     content_busy: bool,
     content_search_rx: Option<Receiver<Result<Vec<crate::content::Project>, String>>>,
     content_install_rx: Option<Receiver<Result<String, String>>>,
@@ -171,6 +172,7 @@ impl LunarApp {
             content_kind: "modpack".into(),
             content_query: String::new(),
             content_results: Vec::new(),
+            content_images: std::collections::BTreeMap::new(),
             content_busy: false,
             content_search_rx: None,
             content_install_rx: None,
@@ -778,6 +780,37 @@ impl LunarApp {
             egui::ComboBox::from_id_salt("content_loader").selected_text(&self.content_loader).show_ui(ui, |ui| {
                 for loader in ["fabric", "forge", "neoforge", "quilt"] { ui.selectable_value(&mut self.content_loader, loader.to_owned(), loader); }
             });
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(!self.content_busy && !self.selected_version.is_empty() && self.content_loader == "fabric", egui::Button::new("Install Sodium + Fabric")).clicked() {
+                    let minecraft = self.selected_version.clone();
+                    let root = self.game_root.clone();
+                    let instance = root.join("instances").join(format!("sodium-{minecraft}"));
+                    let (tx, rx) = mpsc::channel();
+                    self.install_rx = Some(rx);
+                    self.content_busy = true;
+                    self.status = "Installing Fabric and Sodium…".into();
+                    std::thread::spawn(move || {
+                        let result = (|| -> anyhow::Result<InstalledVersion> {
+                            let installed = crate::loaders::install_fabric_profile(&minecraft, &root, &instance)?;
+                            crate::content::install_mod("AANobbMI", &instance, &minecraft, "fabric")?;
+                            Ok(installed)
+                        })().map_err(|error| format!("{error:#}"));
+                        let _ = tx.send(result);
+                    });
+                }
+                if ui.button("OptiFine downloads").clicked() {
+                    let url = "https://optifine.net/downloads";
+                    let result = if cfg!(target_os = "windows") {
+                        Command::new("cmd").args(["/C", "start", "", url]).spawn()
+                    } else if cfg!(target_os = "macos") {
+                        Command::new("open").arg(url).spawn()
+                    } else {
+                        Command::new("xdg-open").arg(url).spawn()
+                    };
+                    self.status = if result.is_ok() { "Opened official OptiFine downloads".into() } else { "Could not open OptiFine downloads".into() };
+                }
+            });
+            ui.label(RichText::new("Sodium is the recommended Intel iGPU option. OptiFine is a separate alternative and should not be installed alongside Sodium.").size(10.0).color(Color32::from_rgb(170, 180, 201)));
         }
         ui.horizontal(|ui| {
             Self::svg_icon(ui, "bytes://lunar-search.svg", include_bytes!("../assets/icons/search.svg"), 18.0);
@@ -802,6 +835,13 @@ impl LunarApp {
             for project in self.content_results.clone() {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
+                        if let Some(texture) = self.content_images.get(&project.project_id) {
+                            ui.add(egui::Image::new((texture.id(), Vec2::splat(72.0))).corner_radius(10.0));
+                        } else {
+                            ui.allocate_ui(Vec2::splat(72.0), |ui| {
+                                ui.painter().rect_filled(ui.max_rect(), 10.0, Color32::from_rgb(32, 40, 58));
+                            });
+                        }
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&project.title).strong().size(15.0));
                             ui.label(RichText::new(format!("{} downloads · {}", project.downloads, project.slug)).size(10.0).color(Color32::GRAY));
@@ -1122,6 +1162,17 @@ impl eframe::App for LunarApp {
         {
             match result {
                 Ok(items) => {
+                    self.content_images.clear();
+                    for project in &items {
+                        if let Some((width, height, pixels)) = &project.icon_rgba {
+                            let image = egui::ColorImage::from_rgba_unmultiplied([*width, *height], pixels);
+                            self.content_images.insert(project.project_id.clone(), ctx.load_texture(
+                                format!("modrinth-{}", project.project_id),
+                                image,
+                                egui::TextureOptions::LINEAR,
+                            ));
+                        }
+                    }
                     self.content_results = items;
                     self.status = format!("Found {} projects", self.content_results.len());
                 }
