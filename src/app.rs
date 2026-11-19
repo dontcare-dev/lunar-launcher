@@ -555,14 +555,14 @@ impl LunarApp {
 
     fn finish_play_session(&mut self) {
         if let Some(started) = self.session_started_at.take() {
-            if let Some(instance_name) = self.session_instance.as_deref() {
-                if let Some(instance) = self.workspace_instances.iter().find(|entry| entry.name == instance_name) {
-                    let instance_path = crate::workspace::instance_path(&self.game_root, instance);
-                    match crate::workspace::backup_all_worlds(&instance_path) {
-                        Ok(backups) if !backups.is_empty() => self.status = format!("Created {} automatic world backup(s)", backups.len()),
-                        Ok(_) => {},
-                        Err(error) => self.status = format!("Automatic world backup failed: {error}"),
-                    }
+            if let Some(instance_name) = self.session_instance.as_deref()
+                && let Some(instance) = self.workspace_instances.iter().find(|entry| entry.name == instance_name)
+            {
+                let instance_path = crate::workspace::instance_path(&self.game_root, instance);
+                match crate::workspace::backup_all_worlds(&instance_path) {
+                    Ok(backups) if !backups.is_empty() => self.status = format!("Created {} automatic world backup(s)", backups.len()),
+                    Ok(_) => {},
+                    Err(error) => self.status = format!("Automatic world backup failed: {error}"),
                 }
             }
             if let Err(error) = self.play_stats.record(
