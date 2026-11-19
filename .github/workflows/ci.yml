@@ -49,7 +49,7 @@ jobs:
         with:
           targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y mingw-w64 libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
+      - run: sudo apt-get update && sudo apt-get install -y mingw-w64 binutils-mingw-w64-x86-64 libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
       - run: cargo build --release
       - run: cargo build --release --target x86_64-pc-windows-gnu
       - run: cp target/release/lunar ../Lunar-Launcher-linux-x64
