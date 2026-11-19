@@ -234,7 +234,8 @@ impl LunarApp {
                 }
                 let file = fs::File::open(&path).map_err(|error| error.to_string())?;
                 let decoder = GifDecoder::new(BufReader::new(file)).map_err(|error| error.to_string())?;
-                let decoded = decoder.into_frames().take(48).collect_frames().map_err(|error| error.to_string())?;
+                let decoded = decoder.into_frames().collect_frames().map_err(|error| error.to_string())?;
+                let decoded = decoded.into_iter().take(48).collect::<Vec<_>>();
                 if decoded.is_empty() {
                     return Err("The selected GIF contains no frames".into());
                 }
