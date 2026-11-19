@@ -195,3 +195,49 @@ impl DownloadManager {
         self.tasks.retain(|task| !task.state.terminal());
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_state_labels_are_stable() {
+        assert_eq!(DownloadState::Queued.label(), "Queued");
+        assert_eq!(DownloadState::Downloading.label(), "Downloading");
+        assert_eq!(DownloadState::Paused.label(), "Paused");
+        assert_eq!(DownloadState::Completed.label(), "Completed");
+        assert_eq!(DownloadState::Cancelled.label(), "Cancelled");
+        assert!(DownloadState::Failed("network".into()).label().contains("network"));
+    }
+
+    #[test]
+    fn terminal_states_are_recognized() {
+        assert!(DownloadState::Completed.terminal());
+        assert!(DownloadState::Cancelled.terminal());
+        assert!(DownloadState::Failed("failed".into()).terminal());
+        assert!(!DownloadState::Queued.terminal());
+        assert!(!DownloadState::Downloading.terminal());
+        assert!(!DownloadState::Paused.terminal());
+    }
+
+    #[test]
+    fn rejects_non_http_download_urls() {
+        let mut manager = DownloadManager::default();
+        let root = std::env::temp_dir().join(format!("lunar-download-test-{}", std::process::id()));
+        assert!(manager.enqueue("file:///etc/passwd", root.clone()).is_err());
+        assert!(manager.enqueue("ftp://example.com/file.jar", root.clone()).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_malformed_download_urls() {
+        let mut manager = DownloadManager::default();
+        assert!(manager.enqueue("not a url", std::env::temp_dir()).is_err());
+    }
+
+    #[test]
+    fn manager_starts_with_empty_queue() {
+        let manager = DownloadManager::default();
+        assert!(manager.tasks().is_empty());
+        assert!(!manager.has_active());
+    }
+}
