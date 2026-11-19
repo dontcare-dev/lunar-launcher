@@ -1391,9 +1391,8 @@ impl LunarApp {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if task.state == crate::downloads::DownloadState::Paused {
                                     if ui.small_button("Resume").clicked() { self.download_manager.resume(task.id); }
-                                } else if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_)) {
-                                    if ui.small_button("Pause").clicked() { self.download_manager.pause(task.id); }
-                                }
+                                } else if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_))
+                                    && ui.small_button("Pause").clicked() { self.download_manager.pause(task.id); }
                                 if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_))
                                     && ui.small_button("Cancel").clicked() { self.download_manager.cancel(task.id); }
                             });
@@ -1427,7 +1426,7 @@ impl LunarApp {
             let script = if save { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.SaveFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" } else { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" };
             Command::new("powershell").args(["-NoProfile", "-Command", script]).output().ok()?
         } else {
-            let mut command = if save { Command::new("zenity") } else { Command::new("zenity") };
+            let mut command = Command::new("zenity");
             if save { command.args(["--file-selection", "--save", "--confirm-overwrite", "--file-filter=Lunar instance | *.lunarpack"]); }
             else { command.args(["--file-selection", "--file-filter=Lunar instance | *.lunarpack"]); }
             command.output().ok().or_else(|| Command::new("kdialog").args(if save { vec!["--getsavefilename", ".", "*.lunarpack"] } else { vec!["--getopenfilename", ".", "*.lunarpack"] }).output().ok())?
