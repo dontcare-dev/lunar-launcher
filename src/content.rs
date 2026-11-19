@@ -71,6 +71,7 @@ fn client() -> Result<reqwest::blocking::Client> {
 fn safe_relative(value: &str) -> Result<PathBuf> {
     let path = Path::new(value);
     if path.as_os_str().is_empty() || path.is_absolute()
+        || value.contains(['\\\\', ':'])
         || path.components().any(|part| !matches!(part, Component::Normal(_)))
     {
         bail!("The downloaded package contains an unsafe file path");
