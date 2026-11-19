@@ -1955,7 +1955,7 @@ impl LunarApp {
     fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Play Stats", "Your Minecraft play history across Lunar Launcher.");
         let total = self.play_stats.total_playtime_seconds;
-        let average = if self.play_stats.total_launches == 0 { 0 } else { total / self.play_stats.total_launches };
+        let average = total.checked_div(self.play_stats.total_launches).unwrap_or_default();
         ui.horizontal_wrapped(|ui| {
             for (label, value) in [
                 ("TOTAL PLAYTIME", crate::stats::format_duration(total)),
