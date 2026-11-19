@@ -552,6 +552,16 @@ impl LunarApp {
 
     fn finish_play_session(&mut self) {
         if let Some(started) = self.session_started_at.take() {
+            if let Some(instance_name) = self.session_instance.as_deref() {
+                if let Some(instance) = self.workspace_instances.iter().find(|entry| entry.name == instance_name) {
+                    let instance_path = crate::workspace::instance_path(&self.game_root, instance);
+                    match crate::workspace::backup_all_worlds(&instance_path) {
+                        Ok(backups) if !backups.is_empty() => self.status = format!("Created {} automatic world backup(s)", backups.len()),
+                        Ok(_) => {},
+                        Err(error) => self.status = format!("Automatic world backup failed: {error}"),
+                    }
+                }
+            }
             if let Err(error) = self.play_stats.record(
                 self.session_version.clone(),
                 self.session_instance.take(),
@@ -1635,7 +1645,7 @@ impl LunarApp {
                     ui.label(RichText::new(format!("{} worlds", worlds.len())).strong().size(18.0));
                     if ui.button("Refresh").clicked() { self.workspace_preview = None; }
                     if ui.button("Open worlds folder").clicked() { self.open_local_path(saves.clone()); }
-                    if ui.button("Import world backup").clicked() && let Some(source) = Self::choose_content_file("shader") {
+                    if ui.button("Import world backup").clicked() && let Some(source) = Self::choose_content_file("archive") {
                         match crate::workspace::restore_world(&source, &path) {
                             Ok(message) => self.status = message,
                             Err(error) => self.status = format!("World import failed: {error}"),
@@ -1756,11 +1766,21 @@ impl LunarApp {
                 ui.label("Recent crash reports and launcher game logs.");
                 for file in crate::workspace::list_files(&path.join("crash-reports"), &["txt"]).unwrap_or_default() {
                     let name = file.file_name().and_then(|value| value.to_str()).unwrap_or("Crash report").to_owned();
-                    ui.horizontal(|ui| { if ui.button(&name).clicked() { self.workspace_preview = crate::workspace::read_tail(&file, 80).ok(); } if ui.small_button("Open").clicked() { self.open_local_path(file); } });
+                    ui.horizontal(|ui| {
+                        if ui.button(&name).clicked() { self.workspace_preview = crate::workspace::read_tail(&file, 120).ok(); }
+                        if ui.small_button("Analyze").clicked() {
+                            self.workspace_preview = fs::read_to_string(&file).ok().map(|log| crate::diagnostics::analyze(&log));
+                        }
+                        if ui.small_button("Open").clicked() { self.open_local_path(file); }
+                    });
                 }
                 let log = path.join("logs").join("latest.log");
                 if log.is_file() && ui.button("View latest.log").clicked() { self.workspace_preview = crate::workspace::read_tail(&log, 100).ok(); }
                 if let Some(preview) = &self.workspace_preview { egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| { ui.add(egui::TextEdit::multiline(&mut preview.clone()).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace)); }); }
+                let latest_log = path.join("logs").join("latest.log");
+                if latest_log.is_file() && ui.button("Analyze latest.log").clicked() {
+                    self.workspace_preview = fs::read_to_string(&latest_log).ok().map(|log| crate::diagnostics::analyze(&log));
+                }
             }
             "Performance" => {
                 ui.label(RichText::new("LIVE SYSTEM MONITOR").strong().color(self.accent));
@@ -2005,7 +2025,7 @@ impl LunarApp {
         let (filter, description) = match kind {
             "mod" => ("*.jar", "Minecraft mod (*.jar)"),
             "modpack" => ("*.mrpack", "Modrinth modpack (*.mrpack)"),
-            "resourcepack" | "shader" => ("*.zip", "ZIP archive (*.zip)"),
+            "resourcepack" | "shader" | "archive" => ("*.zip", "ZIP archive (*.zip)"),
             _ => return None,
         };
         let output = if cfg!(target_os = "windows") {
