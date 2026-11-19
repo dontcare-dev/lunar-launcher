@@ -156,4 +156,40 @@ mod tests {
         let session: PlaySession = serde_json::from_str(r#"{"started_at":1,"ended_at":2,"duration_seconds":1,"version":"1.20.4"}"#).unwrap();
         assert!(session.instance.is_none());
     }
+
+    #[test]
+    fn recording_a_session_clears_active_checkpoint() {
+        let mut stats = PlayStats::default();
+        stats.active_session = Some(ActivePlaySession {
+            started_at: 10,
+            version: "1.21.4".into(),
+            instance: Some("Test".into()),
+        });
+        stats.apply_record("1.21.4".into(), Some("Test".into()), 10, 60, 70);
+        assert!(stats.active_session.is_none());
+        assert_eq!(stats.total_launches, 1);
+        assert_eq!(stats.total_playtime_seconds, 60);
+    }
+
+    #[test]
+    fn session_history_is_capped_at_one_hundred() {
+        let mut stats = PlayStats::default();
+        for index in 0..105 {
+            stats.apply_record("1.21.4".into(), None, index, 1, index + 1);
+        }
+        assert_eq!(stats.recent_sessions.len(), 100);
+        assert_eq!(stats.total_launches, 105);
+    }
+
+    #[test]
+    fn playtime_totals_use_saturating_arithmetic() {
+        let mut stats = PlayStats::default();
+        stats.total_launches = u64::MAX;
+        stats.total_playtime_seconds = u64::MAX;
+        stats.version_playtime.insert("1.21.4".into(), u64::MAX);
+        stats.apply_record("1.21.4".into(), None, 1, 100, 101);
+        assert_eq!(stats.total_launches, u64::MAX);
+        assert_eq!(stats.total_playtime_seconds, u64::MAX);
+        assert_eq!(stats.version_playtime["1.21.4"], u64::MAX);
+    }
 }
