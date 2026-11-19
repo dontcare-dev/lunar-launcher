@@ -307,7 +307,7 @@ impl LunarApp {
     }
 
     fn paint_background(&self, ctx: &egui::Context) {
-        let rect = ctx.content_rect();
+        let rect = ctx.screen_rect();
         let painter = ctx.layer_painter(egui::LayerId::background());
         if let Some(texture) = &self.background_texture {
             painter.image(
