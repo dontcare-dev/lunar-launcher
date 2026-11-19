@@ -168,7 +168,8 @@ pub fn install_fabric_profile(mc: &str, root: &Path, instance: &Path) -> Result<
         .context("No Fabric loader release is available for this Minecraft version")?;
     fabric_or_quilt(mc, &selected.loader.version, instance, root, false)
 }
-\npub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
+
+pub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
     match pack.loaders.iter().next() {
         Some((kind, version)) if kind == "fabric-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, false),
         Some((kind, version)) if kind == "quilt-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, true),
