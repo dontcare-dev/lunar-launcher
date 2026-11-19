@@ -163,7 +163,7 @@ struct FabricLoaderInfo {
 }
 
 pub fn install_fabric_profile(mc: &str, root: &Path, instance: &Path) -> Result<InstalledVersion> {
-    let entries: Vec<FabricLoaderEntry> = fetch_profile(&format!("https://meta.fabricmc.net/v2/versions/loader/{mc}"))?;
+    let entries: Vec<FabricLoaderEntry> = serde_json::from_value(fetch_profile(&format!("https://meta.fabricmc.net/v2/versions/loader/{mc}"))?)?;
     let selected = entries.iter().find(|entry| entry.loader.stable).or_else(|| entries.first())
         .context("No Fabric loader release is available for this Minecraft version")?;
     fabric_or_quilt(mc, &selected.loader.version, instance, root, false)
