@@ -520,7 +520,7 @@ impl LunarApp {
         egui::SidePanel::left("lunar_navigation")
             .exact_width(218.0)
             .resizable(false)
-            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::same(18)))
+            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::same(18)))
             .show(ctx, |ui| {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
@@ -1254,7 +1254,7 @@ impl eframe::App for LunarApp {
         self.paint_background(ctx);
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::symmetric(18, 8)))
+            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::symmetric(18, 8)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("●").color(self.accent).size(9.0));
