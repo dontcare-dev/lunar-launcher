@@ -646,7 +646,16 @@ impl LunarApp {
                         ("Settings", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, section, uri, icon) in navigation {
-                        let active = self.screen == screen && section.is_none_or(|value| self.workspace_section == value);
+                        let category_active = match label {
+                            "Mod Manager" => self.content_kind == "mod",
+                            "Resource Packs" => self.content_kind == "resourcepack",
+                            "Shader Manager" => self.content_kind == "shader",
+                            "Content" => self.content_kind == "modpack",
+                            _ => true,
+                        };
+                        let active = self.screen == screen
+                            && section.is_none_or(|value| self.workspace_section == value)
+                            && category_active;
                         if Self::nav_button(ui, label, active, uri, icon).clicked() {
                             self.screen = screen;
                             match label {
