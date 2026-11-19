@@ -138,9 +138,11 @@ mod tests {
     }
     #[test]
     fn stats_round_trip_preserves_session_history() {
-        let mut stats = PlayStats::default();
-        stats.total_launches = 2;
-        stats.total_playtime_seconds = 7200;
+        let mut stats = PlayStats {
+            total_launches: 2,
+            total_playtime_seconds: 7200,
+            ..PlayStats::default()
+        };
         stats.version_playtime.insert("1.21.4".into(), 7200);
         stats.recent_sessions.push(PlaySession {
             started_at: 10, ended_at: 3610, duration_seconds: 3600,
@@ -159,12 +161,14 @@ mod tests {
 
     #[test]
     fn recording_a_session_clears_active_checkpoint() {
-        let mut stats = PlayStats::default();
-        stats.active_session = Some(ActivePlaySession {
-            started_at: 10,
-            version: "1.21.4".into(),
-            instance: Some("Test".into()),
-        });
+        let mut stats = PlayStats {
+            active_session: Some(ActivePlaySession {
+                started_at: 10,
+                version: "1.21.4".into(),
+                instance: Some("Test".into()),
+            }),
+            ..PlayStats::default()
+        };
         stats.apply_record("1.21.4".into(), Some("Test".into()), 10, 60, 70);
         assert!(stats.active_session.is_none());
         assert_eq!(stats.total_launches, 1);
@@ -183,9 +187,11 @@ mod tests {
 
     #[test]
     fn playtime_totals_use_saturating_arithmetic() {
-        let mut stats = PlayStats::default();
-        stats.total_launches = u64::MAX;
-        stats.total_playtime_seconds = u64::MAX;
+        let mut stats = PlayStats {
+            total_launches: u64::MAX,
+            total_playtime_seconds: u64::MAX,
+            ..PlayStats::default()
+        };
         stats.version_playtime.insert("1.21.4".into(), u64::MAX);
         stats.apply_record("1.21.4".into(), None, 1, 100, 101);
         assert_eq!(stats.total_launches, u64::MAX);
