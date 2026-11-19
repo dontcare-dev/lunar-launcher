@@ -76,3 +76,58 @@ pub fn format_timestamp(timestamp: u64) -> String {
     let days = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs().saturating_sub(timestamp) / 86400;
     if days == 0 { "Today".into() } else if days == 1 { "Yesterday".into() } else { format!("{days} days ago") }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_formats_minutes() { assert_eq!(format_duration(59), "0m"); }
+    #[test]
+    fn duration_formats_exact_hours() { assert_eq!(format_duration(3600), "1h 0m"); }
+    #[test]
+    fn duration_formats_hours_and_minutes() { assert_eq!(format_duration(5_580), "1h 33m"); }
+    #[test]
+    fn duration_ignores_remaining_seconds() { assert_eq!(format_duration(125), "2m"); }
+    #[test]
+    fn timestamp_is_today_for_recent_epoch() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(format_timestamp(now), "Today");
+    }
+    #[test]
+    fn timestamp_is_yesterday_for_one_day_old_epoch() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(format_timestamp(now.saturating_sub(86_400)), "Yesterday");
+    }
+    #[test]
+    fn timestamp_handles_future_values_without_underflow() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(format_timestamp(now.saturating_add(86_400)), "Today");
+    }
+    #[test]
+    fn stats_deserialize_legacy_empty_document() {
+        let stats: PlayStats = serde_json::from_str("{}").unwrap();
+        assert_eq!(stats.total_launches, 0);
+        assert!(stats.recent_sessions.is_empty());
+    }
+    #[test]
+    fn stats_round_trip_preserves_session_history() {
+        let mut stats = PlayStats::default();
+        stats.total_launches = 2;
+        stats.total_playtime_seconds = 7200;
+        stats.version_playtime.insert("1.21.4".into(), 7200);
+        stats.recent_sessions.push(PlaySession {
+            started_at: 10, ended_at: 3610, duration_seconds: 3600,
+            version: "1.21.4".into(), instance: Some("Survival".into()),
+        });
+        let encoded = serde_json::to_string(&stats).unwrap();
+        let decoded: PlayStats = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.total_launches, 2);
+        assert_eq!(decoded.recent_sessions[0].instance.as_deref(), Some("Survival"));
+    }
+    #[test]
+    fn missing_optional_session_instance_deserializes() {
+        let session: PlaySession = serde_json::from_str(r#"{"started_at":1,"ended_at":2,"duration_seconds":1,"version":"1.20.4"}"#).unwrap();
+        assert!(session.instance.is_none());
+    }
+}
