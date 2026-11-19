@@ -454,7 +454,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         set_resource_pack_enabled(&root, "sample.zip", true).unwrap();
         let options = fs::read_to_string(root.join("options.txt")).unwrap();
-        assert!(options.contains("resourcePacks:[\\"file/sample.zip\\"]"));
+        assert!(options.contains("resourcePacks:[\"file/sample.zip\"]"));
         assert!(options.contains("incompatibleResourcePacks:[]"));
         set_resource_pack_enabled(&root, "sample.zip", false).unwrap();
         let options = fs::read_to_string(root.join("options.txt")).unwrap();
