@@ -468,4 +468,60 @@ mod tests {
         assert!(options.contains("incompatibleResourcePacks:[]"));
         let _ = fs::remove_dir_all(root);
     }
+    #[test]
+    fn safe_relative_accepts_nested_normal_paths() {
+        assert_eq!(safe_relative("overrides/config/example.json").unwrap(), PathBuf::from("overrides/config/example.json"));
+    }
+
+    #[test]
+    fn safe_relative_rejects_parent_traversal() {
+        assert!(safe_relative("../outside").is_err());
+        assert!(safe_relative("a/../../outside").is_err());
+    }
+
+    #[test]
+    fn safe_relative_rejects_absolute_and_empty_paths() {
+        assert!(safe_relative("").is_err());
+        assert!(safe_relative("/tmp/outside").is_err());
+        assert!(safe_relative("C:\\outside").is_err());
+    }
+
+    #[test]
+    fn safe_filename_rejects_empty_and_dot_names() {
+        assert!(safe_filename("").is_err());
+        assert!(safe_filename(".").is_err());
+        assert!(safe_filename("..").is_err());
+    }
+
+    #[test]
+    fn resource_pack_enable_is_idempotent() {
+        let root = std::env::temp_dir().join(format!("lunar-resource-idempotent-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        set_resource_pack_enabled(&root, "pack.zip", true).unwrap();
+        set_resource_pack_enabled(&root, "pack.zip", true).unwrap();
+        let options = fs::read_to_string(root.join("options.txt")).unwrap();
+        assert_eq!(options.matches("file/pack.zip").count(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resource_pack_disable_preserves_other_enabled_packs() {
+        let root = std::env::temp_dir().join(format!("lunar-resource-preserve-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        set_resource_pack_enabled(&root, "one.zip", true).unwrap();
+        set_resource_pack_enabled(&root, "two.zip", true).unwrap();
+        set_resource_pack_enabled(&root, "one.zip", false).unwrap();
+        let options = fs::read_to_string(root.join("options.txt")).unwrap();
+        assert!(!options.contains("file/one.zip"));
+        assert!(options.contains("file/two.zip"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_unknown_project_types_before_network_access() {
+        assert!(search("", "unknown").is_err());
+    }
+
 }
