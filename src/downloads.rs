@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io::{Read, Write}, path::PathBuf, sync::{Arc, Condvar, Mutex, mpsc::{self, Receiver, Sender}}};
+use std::{collections::HashMap, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Arc, Condvar, Mutex, mpsc::{self, Receiver, Sender}}};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DownloadState {
@@ -172,6 +172,16 @@ impl DownloadManager {
             state.paused = false;
             control.1.notify_all();
         }
+    }
+
+    pub fn retry(&mut self, id: u64) -> anyhow::Result<u64> {
+        let task = self.tasks.iter().find(|task| task.id == id).cloned()
+            .ok_or_else(|| anyhow::anyhow!("Download task was not found"))?;
+        if !matches!(task.state, DownloadState::Failed(_) | DownloadState::Cancelled) {
+            anyhow::bail!("Only failed or cancelled downloads can be retried");
+        }
+        let directory = task.destination.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        self.enqueue(&task.url, directory)
     }
 
     pub fn poll(&mut self) {
