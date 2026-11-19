@@ -169,6 +169,30 @@ pub fn install_fabric_profile(mc: &str, root: &Path, instance: &Path) -> Result<
     fabric_or_quilt(mc, &selected.loader.version, instance, root, false)
 }
 
+pub fn prepare_instance(mc: &str, loader: Option<&str>, root: &Path, instance: &Path) -> Result<InstalledVersion> {
+    match loader.unwrap_or("vanilla") {
+        "fabric" => install_fabric_profile(mc, root, instance),
+        "quilt" => {
+            let entries = fetch_profile(&format!("https://meta.quiltmc.org/v3/versions/loader/{mc}"))?;
+            let selected = entries.as_array().and_then(|items| items.first())
+                .and_then(|item| item.pointer("/loader/version")).and_then(Value::as_str)
+                .context("No Quilt loader release is available for this Minecraft version")?;
+            fabric_or_quilt(mc, selected, instance, root, true)
+        }
+        "forge" => forge(mc, "", root, instance),
+        "neoforge" => neoforge(mc, "", root, instance),
+        _ => {
+            let mut base = if launcher::installed_versions(root)?.contains(mc) {
+                launcher::load_installed(mc, root)?
+            } else {
+                launcher::install(mc, root, |_| {})?
+            };
+            base.game_directory = Some(instance.to_path_buf());
+            Ok(base)
+        }
+    }
+}
+
 pub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
     match pack.loaders.iter().next() {
         Some((kind, version)) if kind == "fabric-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, false),
