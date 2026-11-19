@@ -142,6 +142,11 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
         .bytes()
         .with_context(|| format!("Could not read the {kind} download"))?;
     if bytes.is_empty() { bail!("The downloaded {kind} file was empty"); }
+    if kind != "mod" {
+        let archive = ZipArchive::new(Cursor::new(bytes.as_ref()))
+            .with_context(|| format!("The downloaded {kind} is not a valid ZIP archive"))?;
+        if archive.is_empty() { bail!("The downloaded {kind} archive contains no files"); }
+    }
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
         && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
     {
