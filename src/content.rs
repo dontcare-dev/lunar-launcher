@@ -113,7 +113,7 @@ fn project_versions(project_id: &str, game_versions: Option<&str>, loaders: Opti
 fn safe_filename(filename: &str) -> Result<&str> {
     let path = Path::new(filename);
     if filename.trim().is_empty()
-        || filename.contains(['/', '\\'])
+        || filename.contains('/') || filename.contains('\\')
         || path.file_name().and_then(|name| name.to_str()) != Some(filename)
         || path.components().count() != 1
         || !matches!(path.components().next(), Some(Component::Normal(_)))
@@ -454,7 +454,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         set_resource_pack_enabled(&root, "sample.zip", true).unwrap();
         let options = fs::read_to_string(root.join("options.txt")).unwrap();
-        assert!(options.contains("resourcePacks:[\\\"file/sample.zip\\\"]"));
+        assert!(options.contains("resourcePacks:[\\"file/sample.zip\\"]"));
         assert!(options.contains("incompatibleResourcePacks:[]"));
         set_resource_pack_enabled(&root, "sample.zip", false).unwrap();
         let options = fs::read_to_string(root.join("options.txt")).unwrap();
