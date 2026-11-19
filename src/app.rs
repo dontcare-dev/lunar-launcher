@@ -544,6 +544,9 @@ impl LunarApp {
     }
 
     fn begin_play_session(&mut self, version: String, instance: Option<String>) {
+        if let Err(error) = self.play_stats.begin_session(version.clone(), instance.clone()) {
+            self.status = format!("Could not checkpoint play session: {error}");
+        }
         self.session_started_at = Some(Instant::now());
         self.session_started_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         self.session_version = version;
