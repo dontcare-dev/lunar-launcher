@@ -1119,7 +1119,7 @@ impl LunarApp {
             }
         });
         if previous_performance != self.performance_mode {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
         }
         ui.group(|ui| {
             ui.horizontal(|ui| {
