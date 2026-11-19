@@ -24,6 +24,15 @@ pub struct Project {
 struct ProjectVersion {
     #[serde(default)]
     files: Vec<VersionFile>,
+    #[serde(default)]
+    dependencies: Vec<VersionDependency>,
+}
+
+#[derive(Deserialize)]
+struct VersionDependency {
+    project_id: Option<String>,
+    version_id: Option<String>,
+    dependency_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -285,8 +294,54 @@ struct ValuePack {
     loaders: std::collections::BTreeMap<String, String>,
 }
 
+fn download_mod_version(version: &ProjectVersion, directory: &Path, seen: &mut std::collections::HashSet<String>, depth: usize, minecraft: &str, loader: &str) -> Result<Vec<String>> {
+    if depth > 8 { bail!("Mod dependency chain is unexpectedly deep"); }
+    fs::create_dir_all(directory)?;
+    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
+        .context("Mod version contains no downloadable file")?;
+    let filename = safe_filename(&file.filename)?;
+    if !filename.to_ascii_lowercase().ends_with(".jar") { bail!("Modrinth returned a non-JAR mod file"); }
+    let mut paths = Vec::new();
+    let mut destination = directory.join(filename);
+    if !destination.exists() {
+        let bytes = client()?.get(&file.url).send()?.error_for_status()?.bytes()?;
+        if bytes.is_empty() { bail!("The downloaded mod file was empty"); }
+        if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
+            && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+        {
+            bail!("Mod checksum verification failed");
+        }
+        let temporary = destination.with_extension("jar.lunar-download");
+        fs::write(&temporary, &bytes)?;
+        fs::rename(&temporary, &destination)?;
+    }
+    paths.push(destination.display().to_string());
+    for dependency in version.dependencies.iter().filter(|dependency| dependency.dependency_type.as_deref() == Some("required")) {
+        let key = dependency.project_id.as_deref().or(dependency.version_id.as_deref()).unwrap_or_default();
+        if key.is_empty() || !seen.insert(key.to_owned()) { continue; }
+        let dependency_version = if let Some(version_id) = dependency.version_id.as_deref() {
+            client()?.get(format!("{API}/version/{version_id}")).send()?.error_for_status()?.json::<ProjectVersion>()?
+        } else if let Some(project_id) = dependency.project_id.as_deref() {
+            project_versions(project_id, Some(minecraft), Some(loader))?
+                .into_iter().find(|candidate| !candidate.files.is_empty())
+                .with_context(|| format!("A required dependency ({project_id}) has no compatible release for Minecraft {minecraft} and {loader}"))?
+        } else {
+            continue;
+        };
+        paths.extend(download_mod_version(&dependency_version, directory, seen, depth + 1, minecraft, loader)?);
+    }
+    Ok(paths)
+}
+
 pub fn install_mod(project_id: &str, root: &Path, minecraft: &str, loader: &str) -> Result<String> {
-    save_project_file(project_id, root, "mods", "mod", Some(minecraft), Some(loader))
+    let versions = project_versions(project_id, Some(minecraft), Some(loader))
+        .with_context(|| format!("Could not retrieve mod versions for Minecraft {minecraft}"))?;
+    let version = versions.iter().find(|version| !version.files.is_empty())
+        .context("No mod version matches the selected Minecraft version and loader")?;
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(project_id.to_owned());
+    let paths = download_mod_version(version, &root.join("mods"), &mut seen, 0, minecraft, loader)?;
+    Ok(paths.join("\n"))
 }
 
 pub fn list_files(root: &Path, kind: &str) -> Result<Vec<PathBuf>> {
