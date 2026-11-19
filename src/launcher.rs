@@ -502,9 +502,6 @@ pub fn detect_java() -> Result<String> {
 }
 
 fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
-    if mode == "Custom" {
-        return Ok(());
-    }
     let path = game_dir.join("options.txt");
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let mut options = std::collections::BTreeMap::<String, String>::new();
@@ -514,6 +511,7 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
         }
     }
     let settings: &[(&str, &str)] = match mode {
+        "Custom" => &[],
         "Maximum FPS" => &[
             ("graphics", "fast"),
             ("renderDistance", "2"),
@@ -575,6 +573,8 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
     for (key, value) in settings {
         options.insert((*key).to_owned(), (*value).to_owned());
     }
+    options.insert("renderDistance".into(), "3".into());
+    options.insert("simulationDistance".into(), "3".into());
     let content = options.into_iter()
         .map(|(key, value)| format!("{key}:{value}"))
         .collect::<Vec<_>>()
