@@ -9,11 +9,12 @@ struct LauncherPreferences {
     memory_mb: u32,
     snapshots: bool,
     background_gif: String,
+    performance_mode: String,
 }
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false, background_gif: String::new() }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into() }
     }
 }
 
@@ -94,6 +95,7 @@ pub struct LunarApp {
     install_progress: Option<InstallProgress>,
     java_status: String,
     memory_mb: u32,
+    performance_mode: String,
     game_process: Option<Child>,
     content_kind: String,
     content_query: String,
@@ -163,7 +165,8 @@ impl LunarApp {
             progress_rx: None,
             install_progress: None,
             java_status,
-            memory_mb: preferences.memory_mb.clamp(512, 16384),
+            memory_mb: preferences.memory_mb.clamp(2048, 8192),
+            performance_mode: preferences.performance_mode.clone(),
             game_process: None,
             content_kind: "modpack".into(),
             content_query: String::new(),
@@ -218,6 +221,7 @@ impl LunarApp {
             memory_mb: self.memory_mb,
             snapshots: self.snapshots,
             background_gif: self.background_gif.clone(),
+            performance_mode: self.performance_mode.clone(),
         }.save();
         let (tx, rx) = mpsc::channel();
         self.background_rx = Some(rx);
@@ -441,7 +445,7 @@ impl LunarApp {
                 }
             },
         };
-        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
+        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
             Ok(process) => {
                 self.installed_version = Some(installed);
                 self.game_process = Some(process);
@@ -653,7 +657,7 @@ impl LunarApp {
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
             if previous_snapshots != self.snapshots {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone() }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
             }
         });
         if let Some(manifest) = &self.manifest {
@@ -975,6 +979,7 @@ impl LunarApp {
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Make LUNAR feel like yours.");
         let previous_memory = self.memory_mb;
+        let previous_performance = self.performance_mode.clone();
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 Self::svg_icon(ui, "bytes://lunar-shield.svg", include_bytes!("../assets/icons/shield.svg"), 19.0);
@@ -1008,11 +1013,32 @@ impl LunarApp {
                 Self::svg_icon(ui, "bytes://lunar-memory.svg", include_bytes!("../assets/icons/memory.svg"), 19.0);
                 ui.label(RichText::new("MEMORY ALLOCATION").strong());
             });
-            ui.add(egui::Slider::new(&mut self.memory_mb, 512..=16384).step_by(512.0).suffix(" MB"));
+            ui.add(egui::Slider::new(&mut self.memory_mb, 2048..=8192).step_by(512.0).suffix(" MB"));
+            ui.label(RichText::new("4 GB is a good starting point for vanilla Minecraft. Avoid allocating all system RAM.").size(11.0).color(Color32::GRAY));
         });
         ui.add_space(10.0);
         if previous_memory != self.memory_mb {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone() }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
+        }
+        ui.add_space(10.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("MINECRAFT PERFORMANCE").strong());
+            egui::ComboBox::from_id_salt("lunar_performance_mode")
+                .selected_text(&self.performance_mode)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.performance_mode, "Performance".into(), "Performance");
+                    ui.selectable_value(&mut self.performance_mode, "Balanced".into(), "Balanced");
+                    ui.selectable_value(&mut self.performance_mode, "Custom".into(), "Keep my in-game settings");
+                });
+            let description = match self.performance_mode.as_str() {
+                "Performance" => "Fast graphics, 6-chunk render distance, 4 simulation distance, minimal particles and no VSync",
+                "Balanced" => "8-chunk render distance with moderate visual settings",
+                _ => "LUNAR will not overwrite your Minecraft video settings",
+            };
+            ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
+        });
+        if previous_performance != self.performance_mode {
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
         }
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -1071,7 +1097,7 @@ impl LunarApp {
                     self.background_frames.clear();
                     self.background_texture = None;
                     self.background_rx = None;
-                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new() }.save();
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone() }.save();
                     self.status = "Animated background removed".into();
                 }
             });
