@@ -1,4 +1,3 @@
-use anyhow::Context;
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
@@ -137,22 +136,11 @@ pub struct LunarApp {
     background_rx: Option<Receiver<BackgroundLoadResult>>,
     workspace_instances: Vec<crate::workspace::Instance>,
     workspace_selected: Option<String>,
-    workspace_new_name: String,
-    workspace_search: String,
-    workspace_results: Vec<String>,
-    workspace_section: String,
-    workspace_preview: Option<String>,
-    world_rename_target: Option<String>,
-    world_rename_value: String,
     play_stats: crate::stats::PlayStats,
     session_started_at: Option<Instant>,
     session_started_epoch: u64,
     session_version: String,
     session_instance: Option<String>,
-    screenshot_textures: std::collections::BTreeMap<String, egui::TextureHandle>,
-    download_manager: crate::downloads::DownloadManager,
-    download_url: String,
-    download_folder: String,
     system_monitor: sysinfo::System,
     last_metrics_refresh: Instant,
     cpu_history: Vec<f32>,
@@ -238,22 +226,11 @@ impl LunarApp {
             background_rx: None,
             workspace_instances: crate::workspace::list_instances(&game_root).unwrap_or_default(),
             workspace_selected: None,
-            workspace_new_name: String::new(),
-            workspace_search: String::new(),
-            workspace_results: Vec::new(),
-            workspace_section: "Overview".into(),
-            workspace_preview: None,
-            world_rename_target: None,
-            world_rename_value: String::new(),
             play_stats: crate::stats::PlayStats::load(),
             session_started_at: None,
             session_started_epoch: 0,
             session_version: String::new(),
             session_instance: None,
-            screenshot_textures: std::collections::BTreeMap::new(),
-            download_manager: crate::downloads::DownloadManager::default(),
-            download_url: String::new(),
-            download_folder: "downloads".into(),
             system_monitor: sysinfo::System::new_all(),
             last_metrics_refresh: Instant::now(),
             cpu_history: Vec::with_capacity(120),
@@ -719,7 +696,7 @@ impl LunarApp {
                             _ => true,
                         };
                         let active = self.screen == screen
-                            && section.is_none_or(|value| self.workspace_section == value)
+                            && section.is_none()
                             && category_active;
                         if Self::nav_button(ui, label, active, uri, icon).clicked() {
                             self.screen = screen;
@@ -733,13 +710,6 @@ impl LunarApp {
                                 self.content_results.clear();
                                 self.content_images.clear();
                                 self.content_results_kind.clear();
-                            }
-                            if let Some(section) = section {
-                                self.workspace_section = section.into();
-                                self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
-                                if self.workspace_selected.is_none() {
-                                    self.workspace_selected = self.workspace_instances.first().map(|instance| instance.id.clone());
-                                }
                             }
                         }
                     }
@@ -1438,7 +1408,7 @@ impl LunarApp {
                     let y = rect.bottom() - rect.height() * value.clamp(0.0, 100.0) / 100.0;
                     egui::pos2(x, y)
                 }).collect();
-                painter.add(egui::Shape::line(points, Stroke::new(2.2, accent)));
+                painter.add(egui::Shape::line(points, Stroke::new(2.2_f32, accent)));
             }
             ui.label(RichText::new("0%").size(9.0).color(Color32::GRAY));
         });
@@ -1607,21 +1577,6 @@ impl LunarApp {
             else if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
             else { Command::new("xdg-open").arg(&path).spawn() };
         self.status = result.map(|_| format!("Opened {}", path.display())).unwrap_or_else(|error| format!("Could not open path: {error}"));
-    }
-
-    fn choose_archive_file(save: bool) -> Option<PathBuf> {
-        let output = if cfg!(target_os = "windows") {
-            let script = if save { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.SaveFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" } else { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" };
-            Command::new("powershell").args(["-NoProfile", "-Command", script]).output().ok()?
-        } else {
-            let mut command = Command::new("zenity");
-            if save { command.args(["--file-selection", "--save", "--confirm-overwrite", "--file-filter=Lunar instance | *.lunarpack"]); }
-            else { command.args(["--file-selection", "--file-filter=Lunar instance | *.lunarpack"]); }
-            command.output().ok().or_else(|| Command::new("kdialog").args(if save { vec!["--getsavefilename", ".", "*.lunarpack"] } else { vec!["--getopenfilename", ".", "*.lunarpack"] }).output().ok())?
-        };
-        if !output.status.success() { return None; }
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        (!value.is_empty()).then(|| PathBuf::from(value))
     }
 
     fn choose_content_file(kind: &str) -> Option<PathBuf> {
@@ -1826,7 +1781,6 @@ impl eframe::App for LunarApp {
             if self.memory_history.len() > 120 { self.memory_history.remove(0); }
             self.last_metrics_refresh = Instant::now();
         }
-        self.download_manager.poll();
         self.poll_background(ctx);
         if let Some(rx) = &self.content_search_rx
             && let Ok(result) = rx.try_recv()
@@ -1936,7 +1890,6 @@ impl eframe::App for LunarApp {
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
-            || self.download_manager.has_active()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
