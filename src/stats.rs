@@ -37,7 +37,18 @@ impl PlayStats {
             if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
             let temporary = path.with_extension("tmp");
             fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
-            fs::rename(temporary, path)?;
+            let backup = path.with_extension("bak");
+            let had_previous = path.exists();
+            if had_previous {
+                let _ = fs::remove_file(&backup);
+                fs::rename(&path, &backup)?;
+            }
+            if let Err(error) = fs::rename(&temporary, &path) {
+                if had_previous { let _ = fs::rename(&backup, &path); }
+                let _ = fs::remove_file(&temporary);
+                return Err(error.into());
+            }
+            if had_previous { let _ = fs::remove_file(backup); }
         }
         Ok(())
     }
@@ -47,7 +58,8 @@ impl PlayStats {
         self.total_launches = self.total_launches.saturating_add(1);
         self.total_playtime_seconds = self.total_playtime_seconds.saturating_add(duration_seconds);
         self.last_played = Some(ended_at);
-        *self.version_playtime.entry(version.clone()).or_default() += duration_seconds;
+        let version_total = self.version_playtime.entry(version.clone()).or_default();
+        *version_total = version_total.saturating_add(duration_seconds);
         self.recent_sessions.insert(0, PlaySession { started_at, ended_at, duration_seconds, version, instance });
         self.recent_sessions.truncate(100);
         self.save()
