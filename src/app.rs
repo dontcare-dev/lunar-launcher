@@ -1605,7 +1605,7 @@ impl LunarApp {
             ];
             ui.horizontal_wrapped(|ui| {
                 for (name, color) in presets {
-                    if ui.add(egui::Button::new(name).fill(color).stroke(Stroke::new(1.0, Color32::WHITE))).clicked() {
+                    if ui.add(egui::Button::new(name).fill(color).stroke(Stroke::new(1.0_f32, Color32::WHITE))).clicked() {
                         self.accent = color;
                         LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [color.r(), color.g(), color.b()] }.save();
                         self.status = format!("{name} accent applied");
