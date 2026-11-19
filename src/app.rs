@@ -1160,7 +1160,7 @@ impl eframe::App for LunarApp {
                     if let Some(profile) = self.profiles.profiles.iter().find(|profile| {
                         Some(profile.name.as_str()) == self.profiles.selected.as_deref()
                     }) {
-                        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb) {
+                        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
                             Ok(process) => {
                                 self.game_process = Some(process);
                                 self.status = format!("Launching {}", installed.id);
