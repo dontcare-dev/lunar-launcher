@@ -516,9 +516,9 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
     let settings: &[(&str, &str)] = match mode {
         "Performance" => &[
             ("graphics", "fast"),
-            ("renderDistance", "6"),
-            ("simulationDistance", "4"),
-            ("maxFps", "260"),
+            ("renderDistance", "4"),
+            ("simulationDistance", "3"),
+            ("maxFps", "60"),
             ("enableVsync", "false"),
             ("particles", "2"),
             ("clouds", "0"),
@@ -526,8 +526,13 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
             ("mipmapLevels", "0"),
             ("entityShadows", "false"),
             ("ao", "false"),
+            ("ambientOcclusion", "false"),
             ("entityDistanceScaling", "0.5"),
             ("renderClouds", "false"),
+            ("bobView", "false"),
+            ("fovEffectScale", "0.0"),
+            ("screenEffectScale", "0.0"),
+            ("distortionEffectScale", "0.0"),
             ("useVbo", "true"),
         ],
         _ => &[
@@ -635,7 +640,6 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
             "-XX:+DisableExplicitGC",
             "-XX:G1ReservePercent=20",
             "-XX:InitiatingHeapOccupancyPercent=15",
-            "-XX:+UseStringDeduplication",
         ])
         .arg(&installed.main_class)
         .args(game)
@@ -772,8 +776,10 @@ mod tests {
         let options = fs::read_to_string(root.join("options.txt")).unwrap();
         assert!(options.contains("key_key.attack:key.mouse.left"));
         assert!(options.contains("gamma:1.0"));
-        assert!(options.contains("renderDistance:6"));
-        assert!(options.contains("simulationDistance:4"));
+        assert!(options.contains("renderDistance:4"));
+        assert!(options.contains("simulationDistance:3"));
+        assert!(options.contains("maxFps:60"));
+        assert!(options.contains("mipmapLevels:0"));
         assert!(options.contains("enableVsync:false"));
         let _ = fs::remove_dir_all(root);
     }
