@@ -16,6 +16,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 directories = "6"
 egui_extras = { version = "0.31", features = ["svg"] }
 image = { version = "0.25", default-features = false, features = ["gif", "png", "jpeg", "webp"] }
+sysinfo = "0.33"
 
 [build-dependencies]
 winres = "0.1"
