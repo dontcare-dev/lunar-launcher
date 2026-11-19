@@ -110,6 +110,7 @@ pub struct LunarApp {
     game_process: Option<Child>,
     content_kind: String,
     content_results_kind: String,
+    content_search_kind: String,
     content_query: String,
     content_results: Vec<crate::content::Project>,
     content_images: std::collections::BTreeMap<String, egui::TextureHandle>,
@@ -198,6 +199,7 @@ impl LunarApp {
             game_process: None,
             content_kind: "modpack".into(),
             content_results_kind: "modpack".into(),
+            content_search_kind: "modpack".into(),
             content_query: String::new(),
             content_results: Vec::new(),
             content_images: std::collections::BTreeMap::new(),
@@ -235,6 +237,7 @@ impl LunarApp {
         let (content_tx, content_rx) = mpsc::channel();
         app.content_search_rx = Some(content_rx);
         app.content_busy = true;
+        app.content_search_kind = "modpack".into();
         std::thread::spawn(move || {
             let _ = content_tx.send(crate::content::search("", "modpack").map_err(|error| error.to_string()));
         });
@@ -634,9 +637,9 @@ impl LunarApp {
                         ("Profiles", Screen::Profiles, None, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                         ("Content", Screen::Content, None, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
                         ("Instance Manager", Screen::Workspace, Some("Overview"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                        ("Mod Manager", Screen::Workspace, Some("Mods"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                        ("Resource Packs", Screen::Workspace, Some("Resource Packs"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                        ("Shader Manager", Screen::Workspace, Some("Shaders"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Mod Manager", Screen::Content, None, "bytes://lunar-mods.svg", include_bytes!("../assets/icons/mods.svg")),
+                        ("Resource Packs", Screen::Content, None, "bytes://lunar-packs.svg", include_bytes!("../assets/icons/resource-packs.svg")),
+                        ("Shader Manager", Screen::Content, None, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
                         ("Performance Center", Screen::Workspace, Some("Performance"), "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
                         ("Launcher Customization", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, None, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
@@ -646,6 +649,17 @@ impl LunarApp {
                         let active = self.screen == screen && section.is_none_or(|value| self.workspace_section == value);
                         if Self::nav_button(ui, label, active, uri, icon).clicked() {
                             self.screen = screen;
+                            match label {
+                                "Mod Manager" => self.content_kind = "mod".into(),
+                                "Resource Packs" => self.content_kind = "resourcepack".into(),
+                                "Shader Manager" => self.content_kind = "shader".into(),
+                                _ => {}
+                            }
+                            if screen == Screen::Content {
+                                self.content_results.clear();
+                                self.content_images.clear();
+                                self.content_results_kind.clear();
+                            }
                             if let Some(section) = section {
                                 self.workspace_section = section.into();
                                 self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
@@ -655,13 +669,6 @@ impl LunarApp {
                             }
                         }
                     }
-                });
-                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                    ui.separator();
-                    ui.label(RichText::new("OFFLINE PROFILES").size(9.0).color(Color32::GRAY).strong());
-                    let selected = self.profiles.selected.as_deref().unwrap_or("No profile");
-                    ui.label(RichText::new(selected).color(Color32::WHITE).strong());
-                    ui.label(RichText::new("Local identity").size(11.0).color(Color32::GRAY));
                 });
             });
     }
@@ -935,10 +942,33 @@ impl LunarApp {
             _ => ("Mod Manager", "Browse compatible mods and install them into the selected Minecraft instance."),
         };
         Self::heading(ui, page_title, page_description);
+        if self.content_kind != "modpack" {
+            let selected_label = self.workspace_instances.iter()
+                .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref())
+                .map(|entry| entry.name.as_str())
+                .unwrap_or("Global Minecraft folder");
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("INSTALL TARGET").size(10.0).strong().color(self.accent));
+                egui::ComboBox::from_id_salt("content_install_target")
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.workspace_selected, None, "Global Minecraft folder");
+                        for instance in &self.workspace_instances {
+                            ui.selectable_value(&mut self.workspace_selected, Some(instance.id.clone()), &instance.name);
+                        }
+                    });
+            });
+        }
         let content_root = self.workspace_instances.iter()
             .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref())
             .map(|entry| crate::workspace::instance_path(&self.game_root, entry))
             .unwrap_or_else(|| self.game_root.clone());
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
+            ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
+            ui.selectable_value(&mut self.content_kind, "mod".into(), "Mods");
+            ui.selectable_value(&mut self.content_kind, "shader".into(), "Shaders");
+        });
         if self.content_results_kind != self.content_kind && !self.content_busy {
             self.content_results.clear();
             self.content_images.clear();
@@ -947,22 +977,12 @@ impl LunarApp {
             let (tx, rx) = mpsc::channel();
             self.content_search_rx = Some(rx);
             self.content_busy = true;
-            self.content_results_kind = kind.clone();
-            self.status = format!("Loading {page_title}…");
+            self.content_search_kind = kind.clone();
+            self.status = format!("Loading {}…", page_title);
             std::thread::spawn(move || {
                 let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string()));
             });
         }
-        if self.content_kind != "modpack" {
-            let selected = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| entry.name.as_str()).unwrap_or("Global Minecraft folder");
-            ui.label(RichText::new(format!("INSTALL TARGET  ·  {selected}")).size(10.0).strong().color(self.accent));
-        }
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
-            ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
-            ui.selectable_value(&mut self.content_kind, "mod".into(), "Mods");
-            ui.selectable_value(&mut self.content_kind, "shader".into(), "Shaders");
-        });
         if self.content_kind == "mod" {
             egui::ComboBox::from_id_salt("content_loader").selected_text(&self.content_loader).show_ui(ui, |ui| {
                 for loader in ["fabric", "forge", "neoforge", "quilt"] { ui.selectable_value(&mut self.content_loader, loader.to_owned(), loader); }
@@ -1011,6 +1031,7 @@ impl LunarApp {
                 self.content_results.clear();
                 self.content_images.clear();
                 self.content_results_kind = kind.clone();
+                self.content_search_kind = kind.clone();
                 self.status = format!("Searching {page_title}…");
                 std::thread::spawn(move || { let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string())); });
             }
@@ -1022,6 +1043,37 @@ impl LunarApp {
             _ => "Install mods into the selected instance's mods folder.",
         };
         ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
+        if self.content_kind != "modpack" {
+            ui.horizontal_wrapped(|ui| {
+                let label = match self.content_kind.as_str() {
+                    "mod" => "Import local .jar",
+                    "resourcepack" => "Import local .zip",
+                    _ => "Import shader .zip",
+                };
+                if ui.button(label).clicked()
+                    && let Some(source) = Self::choose_content_file(&self.content_kind)
+                {
+                    let folder = match self.content_kind.as_str() {
+                        "mod" => "mods",
+                        "resourcepack" => "resourcepacks",
+                        _ => "shaderpacks",
+                    };
+                    let extensions: &[&str] = if self.content_kind == "mod" { &["jar"] } else { &["zip"] };
+                    match crate::workspace::import_content_file(&source, &content_root.join(folder), extensions) {
+                        Ok(destination) => self.status = format!("Imported {}", destination.file_name().unwrap_or_default().to_string_lossy()),
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
+                if ui.button("Open folder").clicked() {
+                    let folder = match self.content_kind.as_str() {
+                        "mod" => "mods",
+                        "resourcepack" => "resourcepacks",
+                        _ => "shaderpacks",
+                    };
+                    self.open_local_path(content_root.join(folder));
+                }
+            });
+        }
         if self.content_busy {
             ui.horizontal(|ui| { ui.spinner(); ui.label(format!("Loading {}…", page_title.to_lowercase())); });
         }
@@ -1046,7 +1098,8 @@ impl LunarApp {
                                 "bytes://lunar-download.svg",
                                 include_bytes!("../assets/icons/download.svg").as_slice(),
                             ).fit_to_exact_size(Vec2::splat(16.0));
-                            if ui.add_enabled(!self.content_busy, egui::Button::image_and_text(install_icon, "Install")).clicked() {
+                            let install_ready = !self.content_busy && (self.content_kind == "modpack" || !self.selected_version.is_empty());
+                            if ui.add_enabled(install_ready, egui::Button::image_and_text(install_icon, "Install")).clicked() {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
                                 let kind = self.content_kind.clone();
@@ -1059,8 +1112,8 @@ impl LunarApp {
                                 self.status = format!("Installing {}…", project.title);
                                 std::thread::spawn(move || {
                                     let result = match kind.as_str() {
-                                        "resourcepack" => crate::content::install_resource_pack(&id, instance_target.as_deref().unwrap_or(&root)),
-                                        "shader" => crate::content::install_shader_pack(&id, instance_target.as_deref().unwrap_or(&root)),
+                                        "resourcepack" => crate::content::install_resource_pack(&id, instance_target.as_deref().unwrap_or(&root), &minecraft),
+                                        "shader" => crate::content::install_shader_pack(&id, instance_target.as_deref().unwrap_or(&root), &minecraft),
                                         "mod" => crate::content::install_mod(&id, instance_target.as_deref().unwrap_or(&root), &minecraft, &loader),
                                         _ => crate::content::install_modpack(&id, &root),
                                     }.map_err(|error| format!("{error:#}"));
@@ -1130,10 +1183,18 @@ impl LunarApp {
         if self.content_kind == "mod" {
         ui.add_space(12.0);
         ui.label(RichText::new("INSTALLED MODS").strong().size(11.0).color(self.accent));
-        for file in crate::content::list_files(&content_root, "mods").unwrap_or_default() {
-            if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
+        let mod_files = crate::content::list_files(&content_root, "mods").unwrap_or_default();
+        if mod_files.is_empty() { ui.label(RichText::new("No mods installed in this instance yet.").size(11.0).color(Color32::GRAY)); }
+        for file in mod_files {
+            if let Some(filename) = file.file_name().and_then(|name| name.to_str()).map(str::to_owned) {
                 ui.horizontal(|ui| {
-                    ui.label(filename);
+                    let mut enabled = !filename.ends_with(".jar.disabled");
+                    if ui.checkbox(&mut enabled, &filename).changed() {
+                        match crate::workspace::toggle_mod(&file, enabled) {
+                            Ok(_) => self.status = format!("Updated {filename}"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
                     if ui.small_button("Remove").clicked() {
                         match crate::content::remove_file(&file, &content_root, "mods") {
                             Ok(()) => self.status = format!("Removed {filename}"),
@@ -1152,7 +1213,13 @@ impl LunarApp {
             for file in shader_files {
                 let filename = file.file_name().and_then(|name| name.to_str()).unwrap_or("shader").to_owned();
                 ui.horizontal(|ui| {
-                    ui.label(&filename);
+                    let mut enabled = !filename.ends_with(".disabled");
+                    if ui.checkbox(&mut enabled, &filename).changed() {
+                        match crate::content::set_file_enabled(&file, enabled) {
+                            Ok(_) => self.status = format!("Updated {filename}"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
                     if ui.small_button("Remove").clicked() {
                         match crate::content::remove_file(&file, &content_root, "shaderpacks") {
                             Ok(()) => self.status = format!("Removed {filename}"),
@@ -1787,23 +1854,26 @@ impl eframe::App for LunarApp {
         if let Some(rx) = &self.content_search_rx
             && let Ok(result) = rx.try_recv()
         {
-            match result {
-                Ok(items) => {
-                    self.content_images.clear();
-                    for project in &items {
-                        if let Some((width, height, pixels)) = &project.icon_rgba {
-                            let image = egui::ColorImage::from_rgba_unmultiplied([*width, *height], pixels);
-                            self.content_images.insert(project.project_id.clone(), ctx.load_texture(
-                                format!("modrinth-{}", project.project_id),
-                                image,
-                                egui::TextureOptions::LINEAR,
-                            ));
+            if self.content_search_kind == self.content_kind {
+                match result {
+                    Ok(items) => {
+                        self.content_images.clear();
+                        for project in &items {
+                            if let Some((width, height, pixels)) = &project.icon_rgba {
+                                let image = egui::ColorImage::from_rgba_unmultiplied([*width, *height], pixels);
+                                self.content_images.insert(project.project_id.clone(), ctx.load_texture(
+                                    format!("modrinth-{}", project.project_id),
+                                    image,
+                                    egui::TextureOptions::LINEAR,
+                                ));
+                            }
                         }
+                        self.content_results = items;
+                        self.content_results_kind = self.content_kind.clone();
+                        self.status = format!("Found {} projects", self.content_results.len());
                     }
-                    self.content_results = items;
-                    self.status = format!("Found {} projects", self.content_results.len());
+                    Err(error) => self.status = error,
                 }
-                Err(error) => self.status = error,
             }
             self.content_search_rx = None;
             self.content_busy = false;
@@ -1815,6 +1885,7 @@ impl eframe::App for LunarApp {
                 Ok(path) => {
                     self.status = format!("Installed to {path}");
                     self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default();
+                    self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
                 }
                 Err(error) => self.status = error,
             }
