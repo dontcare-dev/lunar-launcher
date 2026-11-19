@@ -12,11 +12,12 @@ struct LauncherPreferences {
     performance_mode: String,
     auto_sodium: bool,
     animations_enabled: bool,
+    accent_rgb: [u8; 3],
 }
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true, animations_enabled: true }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true, animations_enabled: true, accent_rgb: [151, 169, 255] }
     }
 }
 
@@ -178,7 +179,7 @@ impl LunarApp {
             version_filter: String::new(),
             snapshots: preferences.snapshots,
             status: "Ready".into(),
-            accent: Color32::from_rgb(151, 169, 255),
+            accent: Color32::from_rgb(preferences.accent_rgb[0], preferences.accent_rgb[1], preferences.accent_rgb[2]),
             game_root: game_root.clone(),
             installed_ids,
             installed_version: None,
@@ -265,7 +266,7 @@ impl LunarApp {
             snapshots: self.snapshots,
             background_gif: self.background_gif.clone(),
             performance_mode: self.performance_mode.clone(),
-            auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled,
+            auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()],
         }.save();
         let (tx, rx) = mpsc::channel();
         self.background_rx = Some(rx);
@@ -622,21 +623,36 @@ impl LunarApp {
                     ui.label(RichText::new("Lunar Launcher").size(21.0).strong());
                 });
                 ui.add_space(34.0);
-                let navigation: [(&str, Screen, &'static str, &'static [u8]); 8] = [
-                    ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
-                    ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
-                    ("Versions", Screen::Versions, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
-                    ("Profiles", Screen::Profiles, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
-                    ("Content", Screen::Content, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                    ("Workspace", Screen::Workspace, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                    ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
-                    ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
-                ];
-                for (label, screen, uri, icon) in navigation {
-                    if Self::nav_button(ui, label, self.screen == screen, uri, icon).clicked() {
-                        self.screen = screen;
+                egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+                    let navigation: [(&str, Screen, Option<&str>, &'static str, &'static [u8]); 13] = [
+                        ("Home", Screen::Home, None, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
+                        ("Play", Screen::Play, None, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
+                        ("Versions", Screen::Versions, None, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
+                        ("Profiles", Screen::Profiles, None, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
+                        ("Content", Screen::Content, None, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Instance Manager", Screen::Workspace, Some("Overview"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Mod Manager", Screen::Workspace, Some("Mods"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Resource Packs", Screen::Workspace, Some("Resource Packs"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Shader Manager", Screen::Workspace, Some("Shaders"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Performance Center", Screen::Workspace, Some("Performance"), "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
+                        ("Launcher Customization", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
+                        ("Servers", Screen::Servers, None, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
+                        ("Settings", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
+                    ];
+                    for (label, screen, section, uri, icon) in navigation {
+                        let active = self.screen == screen && section.is_none_or(|value| self.workspace_section == value);
+                        if Self::nav_button(ui, label, active, uri, icon).clicked() {
+                            self.screen = screen;
+                            if let Some(section) = section {
+                                self.workspace_section = section.into();
+                                self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                                if self.workspace_selected.is_none() {
+                                    self.workspace_selected = self.workspace_instances.first().map(|instance| instance.id.clone());
+                                }
+                            }
+                        }
                     }
-                }
+                });
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                     ui.separator();
                     ui.label(RichText::new("OFFLINE PROFILES").size(9.0).color(Color32::GRAY).strong());
@@ -910,6 +926,10 @@ impl LunarApp {
 
     fn content(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Content", "Install and manage Minecraft content without manual file handling.");
+        if self.content_kind == "mod" {
+            let selected = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| entry.name.as_str()).unwrap_or("Global Minecraft folder");
+            ui.label(format!("Mod install destination: {selected}"));
+        }
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
             ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
@@ -999,6 +1019,7 @@ impl LunarApp {
                                 let kind = self.content_kind.clone();
                                 let minecraft = self.selected_version.clone();
                                 let loader = self.content_loader.clone();
+                                let instance_target = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| crate::workspace::instance_path(&self.game_root, entry));
                                 let (tx, rx) = mpsc::channel();
                                 self.content_install_rx = Some(rx);
                                 self.content_busy = true;
@@ -1007,7 +1028,7 @@ impl LunarApp {
                                     let result = match kind.as_str() {
                                         "resourcepack" => crate::content::install_resource_pack(&id, &root),
                                         "shader" => crate::content::install_shader_pack(&id, &root),
-                                        "mod" => crate::content::install_mod(&id, &root, &minecraft, &loader),
+                                        "mod" => crate::content::install_mod(&id, instance_target.as_deref().unwrap_or(&root), &minecraft, &loader),
                                         _ => crate::content::install_modpack(&id, &root),
                                     }.map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
@@ -1286,7 +1307,11 @@ impl LunarApp {
                 }
             }
             "Mods" => {
-                ui.label("Per-instance mods. Add local JAR files, disable mods without deleting them, or remove them permanently.");
+                ui.label("Per-instance mods. Add local JAR files, browse Modrinth, disable mods without deleting them, or remove them permanently.");
+                if ui.button("Browse Modrinth mods").clicked() {
+                    self.content_kind = "mod".into();
+                    self.screen = Screen::Content;
+                }
                 if ui.button("Add mod JAR").clicked() && let Some(source) = Self::choose_content_file("mod") {
                     match crate::workspace::import_content_file(&source, &path.join("mods"), &["jar"]) {
                         Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
@@ -1329,16 +1354,28 @@ impl LunarApp {
                 if ui.button("Open resource packs folder").clicked() { self.open_local_path(path.join("resourcepacks")); }
             }
             "Shaders" => {
-                ui.label("Import shader ZIP files, then select an installed shader in Minecraft video settings.");
+                ui.label("Import, enable, disable and remove shader ZIP files. Select the active shader in Minecraft video settings.");
                 if ui.button("Add shader-pack ZIP").clicked() && let Some(source) = Self::choose_content_file("shader") {
                     match crate::workspace::import_content_file(&source, &path.join("shaderpacks"), &["zip"]) {
                         Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
                         Err(error) => self.status = error.to_string(),
                     }
                 }
-                for file in crate::workspace::list_files(&path.join("shaderpacks"), &["zip", "jar"]).unwrap_or_default() {
+                for file in crate::workspace::list_files(&path.join("shaderpacks"), &["zip", "jar", "disabled"]).unwrap_or_default() {
                     let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("shader").to_owned();
-                    ui.horizontal(|ui| { ui.label(filename.clone()); if ui.small_button("Remove").clicked() { match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() } } });
+                    let enabled = !filename.ends_with(".disabled");
+                    ui.horizontal(|ui| {
+                        let mut state = enabled;
+                        if ui.checkbox(&mut state, &filename).changed() {
+                            let destination = if state { file.with_extension("") } else { file.with_extension(format!("{}.disabled", file.extension().and_then(|value| value.to_str()).unwrap_or("zip"))) };
+                            match fs::rename(&file, destination) { Ok(()) => self.status = format!("Updated {filename}"), Err(error) => self.status = error.to_string() }
+                        }
+                        if ui.small_button("Remove").clicked() { match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() } }
+                    });
+                }
+                if ui.button("Browse Modrinth shaders").clicked() {
+                    self.content_kind = "shader".into();
+                    self.screen = Screen::Content;
                 }
                 if ui.button("Open shader packs folder").clicked() { self.open_local_path(path.join("shaderpacks")); }
             }
@@ -1399,10 +1436,22 @@ impl LunarApp {
             }
             "Performance" => {
                 ui.label(RichText::new("PERFORMANCE CENTER").strong());
-                if let Some((total, available)) = crate::workspace::system_memory_mb() { ui.label(format!("System memory: {} MB total · {} MB available", total, available)); ui.label(format!("Estimated memory in use: {} MB", total.saturating_sub(available))); } else { ui.label("System memory metrics are unavailable on this platform."); }
+                if let Some((total, available)) = crate::workspace::system_memory_mb() {
+                    ui.label(format!("System memory: {} MB total · {} MB available", total, available));
+                    ui.add(egui::ProgressBar::new((total.saturating_sub(available) as f32 / total.max(1) as f32).clamp(0.0, 1.0)).text("System memory in use"));
+                } else { ui.label("System memory metrics are unavailable on this platform."); }
                 ui.label(format!("Logical CPU threads: {}", std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1)));
                 ui.label(format!("Instance allocation: {} MB", item.memory_mb));
-                ui.label("Use the instance memory control on Overview to adjust its allocation. Actual FPS depends on Minecraft settings, mods and GPU capability.");
+                let previous_allocation = item.memory_mb;
+                ui.add(egui::Slider::new(&mut item.memory_mb, 2048..=16384).step_by(512.0).suffix(" MB"));
+                if previous_allocation != item.memory_mb {
+                    match crate::workspace::save_instance(&self.game_root, &item) {
+                        Ok(()) => { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Instance RAM set to {} MB", item.memory_mb); }
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
+                ui.label("Choose a per-instance RAM limit. Actual FPS depends on Minecraft settings, mods and GPU capability.");
+                if ui.button("Open Performance settings").clicked() { self.screen = Screen::Settings; }
             }
             "Downloads" => {
                 ui.label(RichText::new("DOWNLOAD QUEUE").strong());
@@ -1536,6 +1585,29 @@ impl LunarApp {
             if self.background_rx.is_some() {
                 ui.horizontal(|ui| { ui.spinner(); ui.label("Preparing blurred animation…"); });
             }
+        });
+        ui.add_space(10.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("LAUNCHER APPEARANCE").strong());
+            ui.label("Accent color");
+            let presets = [
+                ("Moonlight", Color32::from_rgb(151, 169, 255)),
+                ("Ice", Color32::from_rgb(105, 207, 255)),
+                ("Violet", Color32::from_rgb(183, 132, 255)),
+                ("Rose", Color32::from_rgb(255, 133, 173)),
+                ("Mint", Color32::from_rgb(112, 224, 185)),
+                ("Amber", Color32::from_rgb(255, 190, 105)),
+            ];
+            ui.horizontal_wrapped(|ui| {
+                for (name, color) in presets {
+                    if ui.add(egui::Button::new(name).fill(color).stroke(Stroke::new(1.0, Color32::WHITE))).clicked() {
+                        self.accent = color;
+                        LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()], accent_rgb: [color.r(), color.g(), color.b()] }.save();
+                        self.status = format!("{name} accent applied");
+                    }
+                }
+            });
+            ui.label("Animated GIF wallpaper, motion effects and accent colors are applied locally.");
         });
         ui.add_space(10.0);
         let previous_memory = self.memory_mb;
