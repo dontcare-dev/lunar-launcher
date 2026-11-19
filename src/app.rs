@@ -293,6 +293,9 @@ impl LunarApp {
             }
             _ => {}
         }
+        if self.game_process.is_some() {
+            return;
+        }
         if !self.background_frames.is_empty() {
             if Instant::now() >= self.background_next {
                 self.background_frame = (self.background_frame + 1) % self.background_frames.len();
