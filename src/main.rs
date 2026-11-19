@@ -3,6 +3,7 @@ mod content;
 mod loaders;
 mod runtime;
 mod server;
+mod workspace;
 mod minecraft;
 mod launcher;
 mod profiles;

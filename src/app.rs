@@ -72,6 +72,7 @@ enum Screen {
     Settings,
     Content,
     Servers,
+    Workspace,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -127,6 +128,13 @@ pub struct LunarApp {
     background_frame: usize,
     background_next: Instant,
     background_rx: Option<Receiver<BackgroundLoadResult>>,
+    workspace_instances: Vec<crate::workspace::Instance>,
+    workspace_selected: Option<String>,
+    workspace_new_name: String,
+    workspace_search: String,
+    workspace_results: Vec<String>,
+    workspace_section: String,
+    workspace_preview: Option<String>,
 }
 
 impl LunarApp {
@@ -203,6 +211,13 @@ impl LunarApp {
             background_frame: 0,
             background_next: Instant::now(),
             background_rx: None,
+            workspace_instances: crate::workspace::list_instances(&game_root).unwrap_or_default(),
+            workspace_selected: None,
+            workspace_new_name: String::new(),
+            workspace_search: String::new(),
+            workspace_results: Vec::new(),
+            workspace_section: "Overview".into(),
+            workspace_preview: None,
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -599,12 +614,13 @@ impl LunarApp {
                     ui.label(RichText::new("Lunar Launcher").size(21.0).strong());
                 });
                 ui.add_space(34.0);
-                let navigation: [(&str, Screen, &'static str, &'static [u8]); 7] = [
+                let navigation: [(&str, Screen, &'static str, &'static [u8]); 8] = [
                     ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                     ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                     ("Versions", Screen::Versions, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
                     ("Profiles", Screen::Profiles, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                     ("Content", Screen::Content, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                    ("Workspace", Screen::Workspace, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
                     ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                     ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                 ];
@@ -1135,6 +1151,245 @@ impl LunarApp {
         if self.server_rx.is_some() { ui.spinner(); }
     }
 
+    fn workspace(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Instance Workspace", "Separate game folders, content, worlds, screenshots and settings.");
+        ui.horizontal(|ui| {
+            ui.add_sized([230.0, 32.0], egui::TextEdit::singleline(&mut self.workspace_new_name).hint_text("New instance name"));
+            if ui.add_enabled(!self.workspace_new_name.trim().is_empty() && !self.selected_version.is_empty(), egui::Button::new("Create instance")).clicked() {
+                match crate::workspace::create_instance(&self.game_root, &self.workspace_new_name, &self.selected_version) {
+                    Ok(item) => { self.workspace_selected = Some(item.id.clone()); self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.workspace_new_name.clear(); self.status = format!("Created {}", item.name); }
+                    Err(error) => self.status = error.to_string(),
+                }
+            }
+            if ui.button("Refresh").clicked() { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); }
+        });
+        ui.horizontal(|ui| {
+            ui.add_sized([280.0, 30.0], egui::TextEdit::singleline(&mut self.workspace_search).hint_text("Search instances, mods, packs, screenshots and logs"));
+            if ui.button("Search files").clicked() {
+                self.workspace_results = crate::workspace::search(&self.game_root, &self.workspace_search).unwrap_or_default();
+                self.workspace_section = "Search".into();
+            }
+        });
+        if self.workspace_instances.is_empty() {
+            ui.group(|ui| { ui.label(RichText::new("No instances yet").strong()); ui.label("Install a Minecraft version on the Play page, then create an isolated instance here."); });
+        }
+        ui.horizontal_wrapped(|ui| {
+            for item in self.workspace_instances.clone() {
+                let selected = self.workspace_selected.as_deref() == Some(item.id.as_str());
+                if ui.selectable_label(selected, format!("{} · {}", item.name, item.minecraft)).clicked() {
+                    self.workspace_selected = Some(item.id.clone());
+                    self.workspace_section = "Overview".into();
+                }
+            }
+        });
+        let Some(mut item) = self.workspace_instances.iter().find(|item| Some(item.id.as_str()) == self.workspace_selected.as_deref()).cloned() else {
+            if self.workspace_section == "Search" {
+                ui.add_space(12.0);
+                ui.label(RichText::new(format!("{} matching files", self.workspace_results.len())).strong());
+                for path in self.workspace_results.clone() {
+                    ui.horizontal(|ui| { ui.label(path.clone()); if ui.small_button("Open").clicked() { self.open_local_path(PathBuf::from(path)); } });
+                }
+            }
+            return;
+        };
+        let path = crate::workspace::instance_path(&self.game_root, &item);
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            for section in ["Overview", "Mods", "Resource Packs", "Shaders", "Worlds & Backups", "Screenshots", "Crash Logs", "Performance", "Downloads"] {
+                ui.selectable_value(&mut self.workspace_section, section.into(), section);
+            }
+        });
+        ui.separator();
+        match self.workspace_section.as_str() {
+            "Overview" => {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&item.name).size(22.0).strong());
+                        ui.label(format!("Minecraft {} · {} launches · Last played {}", item.minecraft, item.play_count, crate::workspace::format_time(item.last_played)));
+                        ui.label(RichText::new(path.display().to_string()).size(10.0).color(Color32::GRAY));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Delete instance").clicked() {
+                            match crate::workspace::delete_instance(&self.game_root, &item) {
+                                Ok(()) => { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.workspace_selected = None; self.status = "Instance deleted".into(); }
+                                Err(error) => self.status = error.to_string(),
+                            }
+                        }
+                        if ui.button("Open folder").clicked() { self.open_local_path(path.clone()); }
+                    });
+                });
+                ui.add_space(12.0);
+                ui.label(RichText::new("INSTANCE NAME").strong().size(10.0).color(self.accent));
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut item.name);
+                    if ui.button("Save name").clicked() {
+                        match crate::workspace::save_instance(&self.game_root, &item) {
+                            Ok(()) => { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = "Instance settings saved".into(); }
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                });
+                ui.label(RichText::new("MEMORY ALLOCATION").strong().size(10.0).color(self.accent));
+                ui.add(egui::Slider::new(&mut item.memory_mb, 2048..=8192).step_by(512.0).suffix(" MB"));
+                ui.label(RichText::new("JAVA RUNTIME OVERRIDE").strong().size(10.0).color(self.accent));
+                egui::ComboBox::from_id_salt("instance_java_override").selected_text(item.java_major.map(|value| format!("Java {value}")).unwrap_or_else(|| "Automatic (Minecraft requirement)".into())).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut item.java_major, None, "Automatic (Minecraft requirement)");
+                    for major in [8_u32, 17, 21] { ui.selectable_value(&mut item.java_major, Some(major), format!("Java {major}")); }
+                });
+                if ui.button("Save instance settings").clicked() {
+                    match crate::workspace::save_instance(&self.game_root, &item) {
+                        Ok(()) => { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = "Instance settings saved".into(); }
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
+                ui.add_space(10.0);
+                ui.label(RichText::new("LAUNCH THIS INSTANCE").strong().size(10.0).color(self.accent));
+                if ui.add_enabled(self.game_process.is_none() && self.install_rx.is_none(), egui::Button::new(RichText::new("Launch instance").strong())).clicked() {
+                    if let Some(profile) = self.profiles.profiles.iter().find(|profile| Some(profile.name.as_str()) == self.profiles.selected.as_deref()) {
+                        match launcher::load_installed(&item.minecraft, &self.game_root) {
+                            Ok(mut installed) => {
+                                installed.game_directory = Some(path.clone());
+                                match launcher::launch(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode) {
+                                    Ok(process) => { self.game_process = Some(process); if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); } self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Launching {}", item.name); }
+                                    Err(error) => self.status = format!("{error:#}"),
+                                }
+                            }
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    } else { self.status = "Select an offline profile on the Play page first".into(); }
+                }
+                ui.label(RichText::new("This instance uses its own mods, resource packs, shaders, saves and logs folders. Fabric/Forge loader installation is managed through Content.").size(11.0).color(Color32::GRAY));
+                let files = crate::workspace::list_files(&path.join("mods"), &["jar", "disabled"]).unwrap_or_default();
+                ui.label(format!("{} mod files · {} resource packs · {} shader packs", files.len(), crate::workspace::list_files(&path.join("resourcepacks"), &["zip"]).unwrap_or_default().len(), crate::workspace::list_files(&path.join("shaderpacks"), &["zip", "jar"]).unwrap_or_default().len()));
+                if ui.button("Export instance pack").clicked() {
+                    let destination = self.game_root.join("exports").join(format!("{}.lunarpack", item.id));
+                    match crate::workspace::export_instance(&path, &destination) { Ok(()) => self.status = format!("Exported instance to {}", destination.display()), Err(error) => self.status = error.to_string() }
+                }
+                if ui.button("Import instance pack").clicked() {
+                    if let Some(source) = Self::choose_archive_file(false) {
+                        match crate::workspace::import_instance(&source, &self.game_root, "Imported Instance") {
+                            Ok(imported) => { self.workspace_selected = Some(imported.id); self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = "Instance pack imported".into(); }
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                }
+            }
+            "Mods" => {
+                ui.label("Per-instance mods. Disable a mod without deleting it, or remove it permanently.");
+                for file in crate::workspace::list_files(&path.join("mods"), &["jar", "disabled"]).unwrap_or_default() {
+                    let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("mod").to_owned();
+                    let enabled = !filename.ends_with(".jar.disabled");
+                    ui.horizontal(|ui| {
+                        let mut state = enabled;
+                        if ui.checkbox(&mut state, &filename).changed() {
+                            match crate::workspace::toggle_mod(&file, state) { Ok(_) => self.status = format!("Updated {filename}"), Err(error) => self.status = error.to_string() }
+                        }
+                        if ui.small_button("Remove").clicked() {
+                            match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() }
+                        }
+                    });
+                }
+                if ui.button("Open mods folder").clicked() { self.open_local_path(path.join("mods")); }
+            }
+            "Resource Packs" => {
+                ui.label("Enable or disable resource packs for this instance. Changes apply after restarting Minecraft.");
+                for file in crate::workspace::list_files(&path.join("resourcepacks"), &["zip"]).unwrap_or_default() {
+                    let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("pack").to_owned();
+                    let mut enabled = crate::content::resource_pack_enabled(&path, &filename);
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut enabled, &filename).changed() {
+                            match crate::content::set_resource_pack_enabled(&path, &filename, enabled) { Ok(()) => self.status = format!("Updated {filename}"), Err(error) => self.status = error.to_string() }
+                        }
+                        if ui.small_button("Remove").clicked() { match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() } }
+                    });
+                }
+                if ui.button("Open resource packs folder").clicked() { self.open_local_path(path.join("resourcepacks")); }
+            }
+            "Shaders" => {
+                ui.label("Shader packs are stored separately from resource packs. Add ZIP shader packs here and select them in Minecraft video settings.");
+                for file in crate::workspace::list_files(&path.join("shaderpacks"), &["zip", "jar"]).unwrap_or_default() {
+                    let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("shader").to_owned();
+                    ui.horizontal(|ui| { ui.label(filename.clone()); if ui.small_button("Remove").clicked() { match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() } } });
+                }
+                if ui.button("Open shader packs folder").clicked() { self.open_local_path(path.join("shaderpacks")); }
+            }
+            "Worlds & Backups" => {
+                let saves = path.join("saves");
+                let worlds = fs::read_dir(&saves).ok().into_iter().flatten().filter_map(|entry| entry.ok()).filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir())).collect::<Vec<_>>();
+                ui.label(RichText::new("WORLD BACKUPS").strong());
+                for world in worlds {
+                    let name = world.file_name().to_string_lossy().to_string();
+                    ui.horizontal(|ui| { ui.label(name.clone()); if ui.button("Back up").clicked() { match crate::workspace::backup_world(&path, &name) { Ok(archive) => self.status = format!("Backup created: {}", archive.display()), Err(error) => self.status = error.to_string() } } });
+                }
+                ui.add_space(8.0);
+                ui.label(RichText::new("RESTORE BACKUP").strong());
+                for backup in crate::workspace::list_files(&path.join("backups"), &["zip"]).unwrap_or_default() {
+                    let name = backup.file_name().and_then(|value| value.to_str()).unwrap_or("backup").to_owned();
+                    ui.horizontal(|ui| { ui.label(name); if ui.button("Restore").clicked() { match crate::workspace::restore_world(&backup, &path) { Ok(message) => self.status = message, Err(error) => self.status = error.to_string() } } });
+                }
+                if ui.button("Open saves folder").clicked() { self.open_local_path(saves); }
+            }
+            "Screenshots" => {
+                let shots = crate::workspace::list_files(&path.join("screenshots"), &["png", "jpg", "jpeg"]).unwrap_or_default();
+                ui.label(format!("{} screenshots", shots.len()));
+                ui.horizontal_wrapped(|ui| { for shot in shots { let name = shot.file_name().and_then(|value| value.to_str()).unwrap_or("Screenshot").to_owned(); if ui.button(name).clicked() { self.open_local_path(shot); } } });
+                if ui.button("Open screenshots folder").clicked() { self.open_local_path(path.join("screenshots")); }
+            }
+            "Crash Logs" => {
+                ui.label("Recent crash reports and launcher game logs.");
+                for file in crate::workspace::list_files(&path.join("crash-reports"), &["txt"]).unwrap_or_default() {
+                    let name = file.file_name().and_then(|value| value.to_str()).unwrap_or("Crash report").to_owned();
+                    ui.horizontal(|ui| { if ui.button(&name).clicked() { self.workspace_preview = crate::workspace::read_tail(&file, 80).ok(); } if ui.small_button("Open").clicked() { self.open_local_path(file); } });
+                }
+                let log = path.join("logs").join("latest.log");
+                if log.is_file() && ui.button("View latest.log").clicked() { self.workspace_preview = crate::workspace::read_tail(&log, 100).ok(); }
+                if let Some(preview) = &self.workspace_preview { egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| { ui.add(egui::TextEdit::multiline(&mut preview.clone()).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace)); }); }
+            }
+            "Performance" => {
+                ui.label(RichText::new("PERFORMANCE CENTER").strong());
+                if let Some((total, available)) = crate::workspace::system_memory_mb() { ui.label(format!("System memory: {} MB total · {} MB available", total, available)); ui.label(format!("Estimated memory in use: {} MB", total.saturating_sub(available))); } else { ui.label("System memory metrics are unavailable on this platform."); }
+                ui.label(format!("Logical CPU threads: {}", std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1)));
+                ui.label(format!("Instance allocation: {} MB", item.memory_mb));
+                ui.label("Use the instance memory control on Overview to adjust its allocation. Actual FPS depends on Minecraft settings, mods and GPU capability.");
+            }
+            "Downloads" => {
+                ui.label(RichText::new("DOWNLOAD ACTIVITY").strong());
+                ui.label(&self.status);
+                if let Some(progress) = &self.install_progress {
+                    let fraction = if progress.total == 0 { 0.0 } else { progress.completed as f32 / progress.total as f32 };
+                    ui.add(egui::ProgressBar::new(fraction).text(format!("{} · {}/{}", progress.phase, progress.completed, progress.total)));
+                } else { ui.label("No Minecraft installation progress is currently reported."); }
+                ui.label("Active Modrinth installs and Java downloads report their current task in the status bar. Pause/resume controls are not available for those transfers yet.");
+            }
+            "Search" => {
+                for result in self.workspace_results.clone() { ui.label(result); }
+            }
+            _ => {}
+        }
+    }
+
+    fn open_local_path(&mut self, path: PathBuf) {
+        let result = if cfg!(target_os = "windows") { Command::new("explorer").arg(&path).spawn() }
+            else if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
+            else { Command::new("xdg-open").arg(&path).spawn() };
+        self.status = result.map(|_| format!("Opened {}", path.display())).unwrap_or_else(|error| format!("Could not open path: {error}"));
+    }
+
+    fn choose_archive_file(save: bool) -> Option<PathBuf> {
+        let output = if cfg!(target_os = "windows") {
+            let script = if save { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.SaveFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" } else { "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='Lunar instance (*.lunarpack)|*.lunarpack'; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.FileName)}" };
+            Command::new("powershell").args(["-NoProfile", "-Command", script]).output().ok()?
+        } else {
+            let mut command = if save { Command::new("zenity") } else { Command::new("zenity") };
+            if save { command.args(["--file-selection", "--save", "--confirm-overwrite", "--file-filter=Lunar instance | *.lunarpack"]); }
+            else { command.args(["--file-selection", "--file-filter=Lunar instance | *.lunarpack"]); }
+            command.output().ok().or_else(|| Command::new("kdialog").args(if save { vec!["--getsavefilename", ".", "*.lunarpack"] } else { vec!["--getopenfilename", ".", "*.lunarpack"] }).output().ok())?
+        };
+        if !output.status.success() { return None; }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        (!value.is_empty()).then(|| PathBuf::from(value))
+    }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Make Lunar Launcher feel like yours.");
         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -1400,6 +1655,7 @@ impl eframe::App for LunarApp {
                             Screen::Profiles => self.profiles(ui),
                             Screen::Content => self.content(ui),
                             Screen::Servers => self.servers(ui),
+                            Screen::Workspace => self.workspace(ui),
                             Screen::Settings => self.settings(ui),
                         }
                     });
