@@ -392,6 +392,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn world_manager_renames_duplicates_backs_up_restores_and_deletes() {
+        let root = std::env::temp_dir().join(format!("lunar-world-manager-{}", std::process::id()));
+        let instance = root.join("instance");
+        let saves = instance.join("saves");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(saves.join("Original")).unwrap();
+        fs::write(saves.join("Original").join("level.dat"), b"level").unwrap();
+        fs::create_dir_all(saves.join("Original").join("region")).unwrap();
+        fs::write(saves.join("Original").join("region").join("r.0.0.mca"), b"region").unwrap();
+
+        rename_world(&instance, "Original", "Renamed").unwrap();
+        duplicate_world(&instance, "Renamed", "Copy").unwrap();
+        assert!(saves.join("Copy").join("level.dat").is_file());
+
+        let backup = backup_world(&instance, "Renamed").unwrap();
+        delete_world(&instance, "Renamed").unwrap();
+        assert!(!saves.join("Renamed").exists());
+        restore_world(&backup, &instance).unwrap();
+        assert!(saves.join("Renamed").join("level.dat").is_file());
+        assert_eq!(list_worlds(&instance).unwrap().len(), 2);
+        assert!(delete_world(&instance, "../outside").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_manager_rejects_duplicate_names_and_invalid_paths() {
+        let root = std::env::temp_dir().join(format!("lunar-world-validation-{}", std::process::id()));
+        let saves = root.join("saves");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(saves.join("World")).unwrap();
+        fs::write(saves.join("World").join("level.dat"), b"level").unwrap();
+        assert!(rename_world(&root, "World", "../outside").is_err());
+        assert!(duplicate_world(&root, "World", "World").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn content_import_rejects_wrong_extensions_and_avoids_overwrites() {
         let root = std::env::temp_dir().join(format!("lunar-content-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
