@@ -36,7 +36,7 @@ impl PlayStats {
     }
 
     pub fn load() -> Self {
-        let mut stats = Self::path().and_then(|path| fs::read(path).ok())
+        let mut stats: Self = Self::path().and_then(|path| fs::read(path).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
         if let Some(active) = stats.active_session.take() {
             let ended_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
