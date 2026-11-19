@@ -71,9 +71,10 @@ pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
         .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30")])
         .send()?.error_for_status()?.json::<serde_json::Value>()?;
     let mut projects: Vec<Project> = serde_json::from_value(response.get("hits").cloned().unwrap_or_default())?;
+    let http = client()?;
     for project in projects.iter_mut().take(18) {
         let Some(url) = project.icon_url.as_deref() else { continue };
-        let Ok(bytes) = client()?.get(url).send().and_then(reqwest::blocking::Response::error_for_status).and_then(|response| response.bytes()) else { continue };
+        let Ok(bytes) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status).and_then(|response| response.bytes()) else { continue };
         let Ok(image) = image::load_from_memory(&bytes) else { continue };
         let image = image.resize(88, 88, image::imageops::FilterType::Triangle).to_rgba8();
         project.icon_rgba = Some((image.width() as usize, image.height() as usize, image.into_raw()));
