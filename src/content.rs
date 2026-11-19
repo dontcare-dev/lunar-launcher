@@ -21,12 +21,16 @@ pub struct Project {
 }
 
 #[derive(Deserialize)]
-struct ProjectVersion { files: Vec<VersionFile> }
+struct ProjectVersion {
+    #[serde(default)]
+    files: Vec<VersionFile>,
+}
 
 #[derive(Deserialize)]
 struct VersionFile {
     url: String,
     filename: String,
+    #[serde(default)]
     primary: bool,
     hashes: Option<std::collections::HashMap<String, String>>,
 }
@@ -83,46 +87,84 @@ pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
     Ok(projects)
 }
 
-pub fn install_resource_pack(project_id: &str, root: &Path, minecraft: &str) -> Result<String> {
+fn project_versions(project_id: &str, game_versions: Option<&str>, loaders: Option<&str>) -> Result<Vec<ProjectVersion>> {
     let http = client()?;
-    let game_versions = serde_json::to_string(&vec![minecraft])?;
-    let versions = http.get(format!("{API}/project/{project_id}/version"))
-        .query(&[("game_versions", game_versions.as_str())])
-        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
-    let version = versions.first().context("No downloadable resource-pack version was found")?;
-    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The resource-pack version contains no files")?;
-    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
+    let mut request = http.get(format!("{API}/project/{project_id}/version"));
+    let game_versions_json = game_versions.map(|version| serde_json::to_string(&vec![version])).transpose()?;
+    let loaders_json = loaders.filter(|loader| !loader.is_empty()).map(|loader| serde_json::to_string(&vec![loader])).transpose()?;
+    if let Some(value) = game_versions_json.as_deref() {
+        request = request.query(&[("game_versions", value)]);
+    }
+    if let Some(value) = loaders_json.as_deref() {
+        request = request.query(&[("loaders", value)]);
+    }
+    Ok(request.send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?)
+}
+
+fn safe_filename(filename: &str) -> Result<&str> {
+    let path = Path::new(filename);
+    if filename.trim().is_empty()
+        || path.file_name().and_then(|name| name.to_str()) != Some(filename)
+        || path.components().count() != 1
+        || !matches!(path.components().next(), Some(Component::Normal(_)))
+    {
+        bail!("Modrinth returned an unsafe download filename");
+    }
+    Ok(filename)
+}
+
+fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, game_version: Option<&str>, loader: Option<&str>) -> Result<String> {
+    let versions = project_versions(project_id, game_version, loader)
+        .with_context(|| format!("Could not retrieve {kind} versions from Modrinth"))?;
+    let version = versions.iter().find(|version| !version.files.is_empty())
+        .context(if game_version.is_some() { "No compatible downloadable version was found. Check the selected Minecraft version and loader." } else { "This project has no downloadable versions." })?;
+    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
+        .context("The selected version contains no downloadable files")?;
+    let filename = safe_filename(&file.filename)?;
+    if kind != "mod" && !filename.to_ascii_lowercase().ends_with(".zip") {
+        bail!("The selected {kind} is not a ZIP archive");
+    }
+    let http = client()?;
+    let bytes = http.get(&file.url).send()
+        .with_context(|| format!("Could not connect to the {kind} download host"))?
+        .error_for_status()
+        .with_context(|| format!("The {kind} download host rejected the request"))?
+        .bytes()
+        .with_context(|| format!("Could not read the {kind} download"))?;
+    if bytes.is_empty() { bail!("The downloaded {kind} file was empty"); }
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
         && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
     {
-        bail!("Resource-pack checksum verification failed");
+        bail!("{kind} checksum verification failed");
     }
-    let directory = root.join("resourcepacks");
+    let directory = root.join(folder);
     fs::create_dir_all(&directory)?;
-    let destination = directory.join(&file.filename);
-    fs::write(&destination, bytes)?;
+    let mut destination = directory.join(filename);
+    if destination.exists() {
+        let stem = Path::new(filename).file_stem().and_then(|value| value.to_str()).unwrap_or("pack");
+        let extension = Path::new(filename).extension().and_then(|value| value.to_str()).unwrap_or("zip");
+        let mut suffix = 2usize;
+        loop {
+            destination = directory.join(format!("{stem}-{suffix}.{extension}"));
+            if !destination.exists() { break; }
+            suffix += 1;
+        }
+    }
+    let temporary = destination.with_extension(format!("{}.lunar-download", destination.extension().and_then(|value| value.to_str()).unwrap_or("zip")));
+    fs::write(&temporary, &bytes)?;
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
+    }
     Ok(destination.display().to_string())
 }
 
-pub fn install_shader_pack(project_id: &str, root: &Path, minecraft: &str) -> Result<String> {
-    let http = client()?;
-    let game_versions = serde_json::to_string(&vec![minecraft])?;
-    let versions = http.get(format!("{API}/project/{project_id}/version"))
-        .query(&[("game_versions", game_versions.as_str())])
-        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
-    let version = versions.first().context("No downloadable shader-pack version was found")?;
-    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The shader-pack version contains no files")?;
-    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
-        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
-    {
-        bail!("Shader-pack checksum verification failed");
-    }
-    let directory = root.join("shaderpacks");
-    fs::create_dir_all(&directory)?;
-    let destination = directory.join(&file.filename);
-    fs::write(&destination, bytes)?;
-    Ok(destination.display().to_string())
+pub fn install_resource_pack(project_id: &str, root: &Path, _minecraft: &str) -> Result<String> {
+    save_project_file(project_id, root, "resourcepacks", "resource pack", None, None)
+}
+
+pub fn install_shader_pack(project_id: &str, root: &Path, _minecraft: &str) -> Result<String> {
+    save_project_file(project_id, root, "shaderpacks", "shader pack", None, None)
 }
 
 pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
@@ -244,31 +286,7 @@ struct ValuePack {
 }
 
 pub fn install_mod(project_id: &str, root: &Path, minecraft: &str, loader: &str) -> Result<String> {
-    let http = client()?;
-    let game_versions = serde_json::to_string(&vec![minecraft])?;
-    let loaders = if loader.is_empty() { "[]".to_owned() } else { serde_json::to_string(&vec![loader])? };
-    let versions = http.get(format!("{API}/project/{project_id}/version"))
-        .query(&[("game_versions", game_versions.as_str()), ("loaders", loaders.as_str())])
-        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
-    let version = versions.first().context("No mod version matches the selected Minecraft version and loader")?;
-    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
-        .context("Mod version contains no downloadable file")?;
-    let directory = root.join("mods");
-    fs::create_dir_all(&directory)?;
-    let destination = directory.join(&file.filename);
-    if destination.is_file() && fs::metadata(&destination)?.len() > 0 {
-        return Ok(destination.display().to_string());
-    }
-    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
-        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
-    {
-        bail!("Mod checksum verification failed");
-    }
-    fs::create_dir_all(&directory)?;
-    let destination = directory.join(&file.filename);
-    fs::write(&destination, bytes)?;
-    Ok(destination.display().to_string())
+    save_project_file(project_id, root, "mods", "mod", Some(minecraft), Some(loader))
 }
 
 pub fn list_files(root: &Path, kind: &str) -> Result<Vec<PathBuf>> {
@@ -334,10 +352,9 @@ pub fn set_resource_pack_enabled(root: &Path, filename: &str, enabled: bool) -> 
     let source = fs::read_to_string(&path).unwrap_or_default();
     let token = format!("file/{filename}");
     let mut active = option_list(root, "resourcePacks");
-    let mut inactive = option_list(root, "incompatibleResourcePacks");
+    let inactive = option_list(root, "incompatibleResourcePacks");
     active.retain(|value| value != &token);
-    inactive.retain(|value| value != &token);
-    if enabled { active.push(token); } else { inactive.push(token); }
+    if enabled { active.push(token); }
     let mut output = Vec::new();
     let mut active_written = false;
     let mut inactive_written = false;
