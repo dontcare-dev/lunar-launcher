@@ -799,7 +799,7 @@ mod tests {
         assert!(options.contains("gamma:1.0"));
         assert!(options.contains("renderDistance:4"));
         assert!(options.contains("simulationDistance:3"));
-        assert!(options.contains("maxFps:60"));
+        assert!(options.contains("maxFps:120"));
         assert!(options.contains("mipmapLevels:0"));
         assert!(options.contains("enableVsync:false"));
         let _ = fs::remove_dir_all(root);
