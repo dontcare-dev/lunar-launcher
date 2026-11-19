@@ -935,6 +935,10 @@ impl LunarApp {
             _ => ("Mod Manager", "Browse compatible mods and install them into the selected Minecraft instance."),
         };
         Self::heading(ui, page_title, page_description);
+        let content_root = self.workspace_instances.iter()
+            .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref())
+            .map(|entry| crate::workspace::instance_path(&self.game_root, entry))
+            .unwrap_or_else(|| self.game_root.clone());
         if self.content_results_kind != self.content_kind && !self.content_busy {
             self.content_results.clear();
             self.content_images.clear();
@@ -949,9 +953,9 @@ impl LunarApp {
                 let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string()));
             });
         }
-        if self.content_kind == "mod" || self.content_kind == "resourcepack" || self.content_kind == "shader" {
+        if self.content_kind != "modpack" {
             let selected = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| entry.name.as_str()).unwrap_or("Global Minecraft folder");
-            ui.label(format!("Mod install destination: {selected}"));
+            ui.label(RichText::new(format!("INSTALL TARGET  ·  {selected}")).size(10.0).strong().color(self.accent));
         }
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
@@ -1013,9 +1017,9 @@ impl LunarApp {
         });
         let description = match self.content_kind.as_str() {
             "modpack" => "Modpacks install into separate instances with their mods and configurations.",
-            "resourcepack" => "Resource packs install directly into Minecraft's resource-pack library.",
-            "shader" => "Browse and install shader packs into Minecraft's shaderpacks folder.",
-            _ => "Install mods into your Minecraft mods folder.",
+            "resourcepack" => "Resource packs install into the selected instance's resource-pack library.",
+            "shader" => "Browse and install shader packs into the selected instance's shaderpacks folder.",
+            _ => "Install mods into the selected instance's mods folder.",
         };
         ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
         if self.content_busy {
@@ -1103,18 +1107,18 @@ impl LunarApp {
         if self.content_kind == "resourcepack" {
         ui.add_space(12.0);
         ui.label(RichText::new("INSTALLED RESOURCE PACKS").strong().size(11.0).color(self.accent));
-        for file in crate::content::list_files(&self.game_root, "resourcepacks").unwrap_or_default() {
+        for file in crate::content::list_files(&content_root, "resourcepacks").unwrap_or_default() {
             if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
                 ui.horizontal(|ui| {
-                    let mut enabled = crate::content::resource_pack_enabled(&self.game_root, filename);
+                    let mut enabled = crate::content::resource_pack_enabled(&content_root, filename);
                     if ui.checkbox(&mut enabled, filename).changed() {
-                        match crate::content::set_resource_pack_enabled(&self.game_root, filename, enabled) {
+                        match crate::content::set_resource_pack_enabled(&content_root, filename, enabled) {
                             Ok(()) => self.status = format!("Updated {filename}; restart Minecraft to apply"),
                             Err(error) => self.status = error.to_string(),
                         }
                     }
                     if ui.small_button("Remove").clicked() {
-                        match crate::content::remove_file(&file, &self.game_root, "resourcepacks") {
+                        match crate::content::remove_file(&file, &content_root, "resourcepacks") {
                             Ok(()) => self.status = format!("Removed {filename}"),
                             Err(error) => self.status = error.to_string(),
                         }
@@ -1126,12 +1130,12 @@ impl LunarApp {
         if self.content_kind == "mod" {
         ui.add_space(12.0);
         ui.label(RichText::new("INSTALLED MODS").strong().size(11.0).color(self.accent));
-        for file in crate::content::list_files(&self.game_root, "mods").unwrap_or_default() {
+        for file in crate::content::list_files(&content_root, "mods").unwrap_or_default() {
             if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
                 ui.horizontal(|ui| {
                     ui.label(filename);
                     if ui.small_button("Remove").clicked() {
-                        match crate::content::remove_file(&file, &self.game_root, "mods") {
+                        match crate::content::remove_file(&file, &content_root, "mods") {
                             Ok(()) => self.status = format!("Removed {filename}"),
                             Err(error) => self.status = error.to_string(),
                         }
@@ -1143,14 +1147,14 @@ impl LunarApp {
         if self.content_kind == "shader" {
             ui.add_space(12.0);
             ui.label(RichText::new("INSTALLED SHADERS").strong().size(11.0).color(self.accent));
-            let shader_files = crate::content::list_files(&self.game_root, "shaderpacks").unwrap_or_default();
+            let shader_files = crate::content::list_files(&content_root, "shaderpacks").unwrap_or_default();
             if shader_files.is_empty() { ui.label(RichText::new("No shader packs installed yet.").size(11.0).color(Color32::GRAY)); }
             for file in shader_files {
                 let filename = file.file_name().and_then(|name| name.to_str()).unwrap_or("shader").to_owned();
                 ui.horizontal(|ui| {
                     ui.label(&filename);
                     if ui.small_button("Remove").clicked() {
-                        match crate::content::remove_file(&file, &self.game_root, "shaderpacks") {
+                        match crate::content::remove_file(&file, &content_root, "shaderpacks") {
                             Ok(()) => self.status = format!("Removed {filename}"),
                             Err(error) => self.status = error.to_string(),
                         }
@@ -1162,7 +1166,7 @@ impl LunarApp {
         ui.horizontal(|ui| {
             for (label, folder) in [("Open resource packs", "resourcepacks"), ("Open mods", "mods"), ("Open shaders", "shaderpacks")] {
                 if ui.button(label).clicked() {
-                    let path = self.game_root.join(folder);
+                    let path = content_root.join(folder);
                     let _ = fs::create_dir_all(&path);
                     let result = if cfg!(target_os = "windows") { Command::new("explorer").arg(&path).spawn() }
                         else if cfg!(target_os = "macos") { Command::new("open").arg(&path).spawn() }
