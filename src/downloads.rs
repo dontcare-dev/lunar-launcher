@@ -93,9 +93,10 @@ impl DownloadManager {
         }
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
+        let url = url.to_owned();
         let control = Arc::new((Mutex::new(ControlState::default()), Condvar::new()));
         self.controls.insert(id, Arc::clone(&control));
-        let task = DownloadTask { id, url: url.to_owned(), filename: destination.file_name().and_then(|value| value.to_str()).unwrap_or(&filename).to_owned(), destination: destination.clone(), state: DownloadState::Queued, downloaded: 0, total: None };
+        let task = DownloadTask { id, url: url.clone(), filename: destination.file_name().and_then(|value| value.to_str()).unwrap_or(&filename).to_owned(), destination: destination.clone(), state: DownloadState::Queued, downloaded: 0, total: None };
         self.tasks.push(task);
         let sender = self.sender.clone();
         std::thread::spawn(move || {
