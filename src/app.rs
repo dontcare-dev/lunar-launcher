@@ -390,6 +390,7 @@ impl LunarApp {
                 self.install_rx = None;
                 self.progress_rx = None;
                 self.install_progress = None;
+                self.content_busy = false;
                 self.status = "Minecraft installation complete".into();
             }
             Some(Ok(Err(error))) => {
@@ -397,12 +398,14 @@ impl LunarApp {
                 self.install_rx = None;
                 self.progress_rx = None;
                 self.install_progress = None;
+                self.content_busy = false;
             }
             Some(Err(TryRecvError::Disconnected)) => {
                 self.status = "Minecraft installation stopped unexpectedly".into();
                 self.install_rx = None;
                 self.progress_rx = None;
                 self.install_progress = None;
+                self.content_busy = false;
             }
             _ => {}
         }
