@@ -143,6 +143,8 @@ pub struct LunarApp {
     download_manager: crate::downloads::DownloadManager,
     download_url: String,
     download_folder: String,
+    system_monitor: sysinfo::System,
+    last_metrics_refresh: Instant,
 }
 
 impl LunarApp {
@@ -232,6 +234,8 @@ impl LunarApp {
             download_manager: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
             download_folder: "downloads".into(),
+            system_monitor: sysinfo::System::new_all(),
+            last_metrics_refresh: Instant::now(),
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -1611,22 +1615,110 @@ impl LunarApp {
                 if let Some(preview) = &self.workspace_preview { egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| { ui.add(egui::TextEdit::multiline(&mut preview.clone()).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace)); }); }
             }
             "Performance" => {
-                ui.label(RichText::new("PERFORMANCE CENTER").strong());
-                if let Some((total, available)) = crate::workspace::system_memory_mb() {
-                    ui.label(format!("System memory: {} MB total · {} MB available", total, available));
-                    ui.add(egui::ProgressBar::new((total.saturating_sub(available) as f32 / total.max(1) as f32).clamp(0.0, 1.0)).text("System memory in use"));
-                } else { ui.label("System memory metrics are unavailable on this platform."); }
-                ui.label(format!("Logical CPU threads: {}", std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1)));
-                ui.label(format!("Instance allocation: {} MB", item.memory_mb));
+                ui.label(RichText::new("LIVE SYSTEM MONITOR").strong().color(self.accent));
+                let cpu = self.system_monitor.global_cpu_usage();
+                let total_memory = self.system_monitor.total_memory() / 1024 / 1024;
+                let used_memory = self.system_monitor.used_memory() / 1024 / 1024;
+                ui.horizontal_wrapped(|ui| {
+                    ui.group(|ui| {
+                        ui.label(RichText::new("CPU LOAD").size(10.0).color(Color32::GRAY));
+                        ui.label(RichText::new(format!("{cpu:.0}%")).size(24.0).strong());
+                        ui.add(egui::ProgressBar::new((cpu / 100.0).clamp(0.0, 1.0)).desired_width(150.0));
+                    });
+                    ui.group(|ui| {
+                        ui.label(RichText::new("SYSTEM RAM").size(10.0).color(Color32::GRAY));
+                        ui.label(RichText::new(format!("{used_memory} / {total_memory} MB")).size(19.0).strong());
+                        ui.add(egui::ProgressBar::new((used_memory as f32 / total_memory.max(1) as f32).clamp(0.0, 1.0)).desired_width(180.0));
+                    });
+                    ui.group(|ui| {
+                        ui.label(RichText::new("CPU THREADS").size(10.0).color(Color32::GRAY));
+                        ui.label(RichText::new(format!("{}", self.system_monitor.cpus().len())).size(24.0).strong());
+                        ui.label("Logical processors");
+                    });
+                });
+                if let Some(process) = self.game_process.as_ref() {
+                    let pid = sysinfo::Pid::from_u32(process.id());
+                    if let Some(game) = self.system_monitor.process(pid) {
+                        ui.group(|ui| {
+                            ui.label(RichText::new("MINECRAFT PROCESS").strong());
+                            ui.horizontal(|ui| {
+                                ui.label(format!("RAM: {} MB", game.memory() / 1024 / 1024));
+                                ui.label(format!("CPU: {:.1}%", game.cpu_usage()));
+                                ui.label(format!("PID: {}", process.id()));
+                            });
+                        });
+                    }
+                } else {
+                    ui.label(RichText::new("Minecraft is not running. Live game-process metrics will appear here after launch.").size(11.0).color(Color32::GRAY));
+                }
+                ui.add_space(8.0);
+                ui.label(RichText::new("INSTANCE MEMORY").strong().color(self.accent));
+                ui.label(format!("{} · Minecraft {}", item.name, item.minecraft));
                 let previous_allocation = item.memory_mb;
-                ui.add(egui::Slider::new(&mut item.memory_mb, 2048..=16384).step_by(512.0).suffix(" MB"));
+                let memory_limit = (total_memory.saturating_sub(2048) as u32).clamp(2048, 16384);
+                ui.add(egui::Slider::new(&mut item.memory_mb, 2048..=memory_limit.max(2048)).step_by(512.0).suffix(" MB"));
                 if previous_allocation != item.memory_mb {
                     match crate::workspace::save_instance(&self.game_root, &item) {
                         Ok(()) => { self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Instance RAM set to {} MB", item.memory_mb); }
                         Err(error) => self.status = error.to_string(),
                     }
                 }
-                ui.label("Choose a per-instance RAM limit. Actual FPS depends on Minecraft settings, mods and GPU capability.");
+                ui.label("Keep enough memory for Windows and background apps. More allocated RAM does not automatically mean more FPS.");
+                ui.add_space(8.0);
+                ui.label(RichText::new("ACTIVE GAME CONFIGURATION").strong().color(self.accent));
+                ui.label(format!("Performance profile: {}", self.performance_mode));
+                ui.label("Render distance: 3 chunks · Simulation distance: 3 chunks");
+                ui.label(format!("Mod loader: {}", item.loader.as_deref().unwrap_or("Vanilla")));
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Install recommended optimizations").clicked() {
+                        let root = self.game_root.clone();
+                        let instance_path = path.clone();
+                        let mut instance = item.clone();
+                        let mc = item.minecraft.clone();
+                        let (tx, rx) = mpsc::channel();
+                        self.content_install_rx = Some(rx);
+                        self.content_busy = true;
+                        self.status = "Installing Fabric and performance mods…".into();
+                        std::thread::spawn(move || {
+                            let result = (|| -> anyhow::Result<String> {
+                                instance.loader = Some("fabric".into());
+                                crate::workspace::save_instance(&root, &instance)?;
+                                crate::loaders::prepare_instance(&mc, Some("fabric"), &root, &instance_path)?;
+                                let mut installed = Vec::new();
+                                for (id, name) in [("AANobbMI", "Sodium"), ("gvQqBUqZ", "Lithium"), ("uXXizFIs", "FerriteCore"), ("NNAgCjsB", "EntityCulling")] {
+                                    crate::content::install_mod(id, &instance_path, &mc, "fabric")
+                                        .with_context(|| format!("Could not install {name}"))?;
+                                    installed.push(name);
+                                }
+                                Ok(format!("Installed {} performance mods", installed.join(", ")))
+                            })().map_err(|error| format!("{error:#}"));
+                            let _ = tx.send(result);
+                        });
+                    }
+                    if ui.button("Install customizable HUD widgets").clicked() {
+                        let root = self.game_root.clone();
+                        let instance_path = path.clone();
+                        let mut instance = item.clone();
+                        let mc = item.minecraft.clone();
+                        let (tx, rx) = mpsc::channel();
+                        self.content_install_rx = Some(rx);
+                        self.content_busy = true;
+                        self.status = "Installing customizable HUD widgets…".into();
+                        std::thread::spawn(move || {
+                            let result = (|| -> anyhow::Result<String> {
+                                instance.loader = Some("fabric".into());
+                                crate::workspace::save_instance(&root, &instance)?;
+                                crate::loaders::prepare_instance(&mc, Some("fabric"), &root, &instance_path)?;
+                                crate::content::install_mod("hud-better-widgets", &instance_path, &mc, "fabric")?;
+                                Ok("Installed Better HUD Widgets. Open its in-game editor with K to place and configure widgets.".into())
+                            })().map_err(|error| format!("{error:#}"));
+                            let _ = tx.send(result);
+                        });
+                    }
+                    if ui.button("Open instance mods").clicked() { self.open_local_path(path.join("mods")); }
+                });
+                ui.label(RichText::new("The HUD widget mod adds draggable FPS, ping, coordinates, armor, hunger and saturation displays. Its editor lets you position and resize each widget in-game.").size(11.0).color(Color32::GRAY));
+                ui.label(RichText::new("Intel integrated graphics: keep shaders off or use lightweight shaders only; shader effects can reduce frame rate significantly.").size(10.0).color(Color32::GRAY));
                 if ui.button("Open Performance settings").clicked() { self.screen = Screen::Settings; }
             }
             "Downloads" => {
@@ -1894,6 +1986,10 @@ impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
+        if self.last_metrics_refresh.elapsed() >= Duration::from_secs(1) {
+            self.system_monitor.refresh_all();
+            self.last_metrics_refresh = Instant::now();
+        }
         self.download_manager.poll();
         self.poll_background(ctx);
         if let Some(rx) = &self.content_search_rx
