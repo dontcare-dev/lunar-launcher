@@ -818,7 +818,7 @@ impl LunarApp {
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
             if previous_snapshots != self.snapshots {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
             }
         });
         if let Some(manifest) = &self.manifest {
@@ -1334,7 +1334,11 @@ impl LunarApp {
                 if ui.button("Open mods folder").clicked() { self.open_local_path(path.join("mods")); }
             }
             "Resource Packs" => {
-                ui.label("Import ZIP packs, enable or disable them, and remove packs from this instance.");
+                ui.label("Import ZIP packs, browse Modrinth, enable or disable them, and remove packs from this instance.");
+                if ui.button("Browse Modrinth resource packs").clicked() {
+                    self.content_kind = "resourcepack".into();
+                    self.screen = Screen::Content;
+                }
                 if ui.button("Add resource-pack ZIP").clicked() && let Some(source) = Self::choose_content_file("resourcepack") {
                     match crate::workspace::import_content_file(&source, &path.join("resourcepacks"), &["zip"]) {
                         Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
@@ -1578,7 +1582,7 @@ impl LunarApp {
                     self.background_frames.clear();
                     self.background_texture = None;
                     self.background_rx = None;
-                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
                     self.status = "Animated background removed".into();
                 }
             });
@@ -1602,7 +1606,7 @@ impl LunarApp {
                 for (name, color) in presets {
                     if ui.add(egui::Button::new(name).fill(color).stroke(Stroke::new(1.0, Color32::WHITE))).clicked() {
                         self.accent = color;
-                        LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()], accent_rgb: [color.r(), color.g(), color.b()] }.save();
+                        LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [color.r(), color.g(), color.b()] }.save();
                         self.status = format!("{name} accent applied");
                     }
                 }
@@ -1651,11 +1655,11 @@ impl LunarApp {
         });
         ui.add_space(10.0);
         if previous_memory != self.memory_mb {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
         }
         ui.add_space(10.0);
         if ui.checkbox(&mut self.animations_enabled, "Enable animated interface and ambient effects").changed() {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
         }
         ui.group(|ui| {
             ui.label(RichText::new("MINECRAFT PERFORMANCE").strong());
@@ -1675,11 +1679,11 @@ impl LunarApp {
             };
             ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
             if ui.checkbox(&mut self.auto_sodium, "Automatically install Fabric + Sodium for vanilla launches").changed() {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
             }
         });
         if previous_performance != self.performance_mode {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled, accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()] }.save();
         }
         ui.group(|ui| {
             ui.horizontal(|ui| {
