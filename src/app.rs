@@ -1,7 +1,7 @@
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
-use std::{fs, io::BufReader, path::PathBuf, process::{Child, Command}, sync::{mpsc::{self, Receiver, TryRecvError}, Arc}, time::{Duration, Instant}};
+use std::{fs, io::BufReader, path::PathBuf, process::{Child, Command}, sync::{mpsc::{self, Receiver, TryRecvError}}, time::{Duration, Instant}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
