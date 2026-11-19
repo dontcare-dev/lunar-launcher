@@ -34,6 +34,7 @@ struct VersionFile {
 #[derive(Deserialize)]
 struct PackManifest {
     name: String,
+    #[serde(rename = "versionId", alias = "version_id")]
     version_id: String,
     dependencies: std::collections::HashMap<String, String>,
     files: Vec<PackFile>,
@@ -94,8 +95,6 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
         bail!("Resource-pack checksum verification failed");
     }
     let directory = root.join("resourcepacks");
-    fs::create_dir_all(&directory)?;
-    let destination = directory.join(&file.filename);
     fs::write(&destination, bytes)?;
     Ok(destination.display().to_string())
 }
@@ -228,13 +227,18 @@ pub fn install_mod(project_id: &str, root: &Path, minecraft: &str, loader: &str)
     let version = versions.first().context("No mod version matches the selected Minecraft version and loader")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first())
         .context("Mod version contains no downloadable file")?;
+    let directory = root.join("mods");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(&file.filename);
+    if destination.is_file() && fs::metadata(&destination)?.len() > 0 {
+        return Ok(destination.display().to_string());
+    }
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
         && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
     {
         bail!("Mod checksum verification failed");
     }
-    let directory = root.join("mods");
     fs::create_dir_all(&directory)?;
     let destination = directory.join(&file.filename);
     fs::write(&destination, bytes)?;
