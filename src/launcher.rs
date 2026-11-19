@@ -501,7 +501,68 @@ pub fn detect_java() -> Result<String> {
     Ok(version)
 }
 
-pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32) -> Result<Child> {
+fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
+    if mode == "Custom" {
+        return Ok(());
+    }
+    let path = game_dir.join("options.txt");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let mut options = std::collections::BTreeMap::<String, String>::new();
+    for line in existing.lines() {
+        if let Some((key, value)) = line.split_once(':') {
+            options.insert(key.to_owned(), value.to_owned());
+        }
+    }
+    let settings: &[(&str, &str)] = match mode {
+        "Performance" => &[
+            ("graphics", "fast"),
+            ("renderDistance", "6"),
+            ("simulationDistance", "4"),
+            ("maxFps", "260"),
+            ("enableVsync", "false"),
+            ("particles", "2"),
+            ("clouds", "0"),
+            ("biomeBlendRadius", "0"),
+            ("mipmapLevels", "0"),
+            ("entityShadows", "false"),
+            ("ao", "false"),
+            ("entityDistanceScaling", "0.5"),
+            ("renderClouds", "false"),
+            ("useVbo", "true"),
+        ],
+        _ => &[
+            ("graphics", "fast"),
+            ("renderDistance", "8"),
+            ("simulationDistance", "6"),
+            ("maxFps", "120"),
+            ("enableVsync", "false"),
+            ("particles", "1"),
+            ("clouds", "1"),
+            ("biomeBlendRadius", "2"),
+            ("mipmapLevels", "2"),
+            ("entityShadows", "false"),
+            ("ao", "false"),
+            ("entityDistanceScaling", "0.75"),
+            ("useVbo", "true"),
+        ],
+    };
+    for (key, value) in settings {
+        options.insert((*key).to_owned(), (*value).to_owned());
+    }
+    let content = options.into_iter()
+        .map(|(key, value)| format!("{key}:{value}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let temporary = path.with_extension("lunar-tmp");
+    fs::write(&temporary, format!("{content}\n"))?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str) -> Result<Child> {
     let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
     let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let required_major = installed.metadata.pointer("/javaVersion/majorVersion").and_then(Value::as_u64).unwrap_or(8) as u32;
@@ -517,6 +578,7 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     if runtime_major < required_major {
         bail!("Minecraft {} requires Java {}, but the detected runtime is Java {}", installed.id, required_major, runtime_major);
     }
+    apply_performance_options(game_dir, performance_mode)?;
     let assets_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(game_dir).join("assets");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = installed.libraries.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>().join(separator);
@@ -563,8 +625,18 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
     let log = OpenOptions::new().create(true).append(true).open(logs.join("lunar-game.log"))?;
     let log = Arc::new(Mutex::new(log));
     command.current_dir(game_dir)
-        .arg(format!("-Xmx{}M", memory_mb.max(512)))
+        .arg(format!("-Xms{}M", (memory_mb / 2).max(512)))
+        .arg(format!("-Xmx{}M", memory_mb.clamp(1024, 8192)))
         .args(jvm)
+        .args([
+            "-XX:+UseG1GC",
+            "-XX:+ParallelRefProcEnabled",
+            "-XX:MaxGCPauseMillis=50",
+            "-XX:+DisableExplicitGC",
+            "-XX:G1ReservePercent=20",
+            "-XX:InitiatingHeapOccupancyPercent=15",
+            "-XX:+UseStringDeduplication",
+        ])
         .arg(&installed.main_class)
         .args(game)
         .stdout(Stdio::piped())
