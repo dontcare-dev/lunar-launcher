@@ -1878,7 +1878,7 @@ impl LunarApp {
                                 crate::workspace::save_instance(&root, &instance)?;
                                 crate::loaders::prepare_instance(&mc, Some("fabric"), &root, &instance_path)?;
                                 crate::content::install_mod("hud-better-widgets", &instance_path, &mc, "fabric")?;
-                                Ok("Installed Better HUD Widgets. Open its in-game editor with K to place and configure widgets.".into())
+                                Ok("Installed Better HUD Widgets. Open the mod's in-game settings/keybind menu to configure and position widgets.".into())
                             })().map_err(|error| format!("{error:#}"));
                             let _ = tx.send(result);
                         });
@@ -1923,6 +1923,13 @@ impl LunarApp {
                                     && ui.small_button("Pause").clicked() { self.download_manager.pause(task.id); }
                                 if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_))
                                     && ui.small_button("Cancel").clicked() { self.download_manager.cancel(task.id); }
+                                if matches!(task.state, crate::downloads::DownloadState::Failed(_) | crate::downloads::DownloadState::Cancelled)
+                                    && ui.small_button("Retry").clicked() {
+                                    match self.download_manager.retry(task.id) {
+                                        Ok(_) => self.status = format!("Retrying {}", task.filename),
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
                             });
                         });
                         if let Some(total) = task.total.filter(|total| *total > 0) {
