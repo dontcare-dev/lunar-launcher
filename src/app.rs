@@ -135,6 +135,7 @@ pub struct LunarApp {
     workspace_results: Vec<String>,
     workspace_section: String,
     workspace_preview: Option<String>,
+    screenshot_textures: std::collections::BTreeMap<String, egui::TextureHandle>,
     download_manager: crate::downloads::DownloadManager,
     download_url: String,
     download_folder: String,
@@ -221,6 +222,7 @@ impl LunarApp {
             workspace_results: Vec::new(),
             workspace_section: "Overview".into(),
             workspace_preview: None,
+            screenshot_textures: std::collections::BTreeMap::new(),
             download_manager: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
             download_folder: "downloads".into(),
@@ -1359,7 +1361,30 @@ impl LunarApp {
             "Screenshots" => {
                 let shots = crate::workspace::list_files(&path.join("screenshots"), &["png", "jpg", "jpeg"]).unwrap_or_default();
                 ui.label(format!("{} screenshots", shots.len()));
-                ui.horizontal_wrapped(|ui| { for shot in shots { let name = shot.file_name().and_then(|value| value.to_str()).unwrap_or("Screenshot").to_owned(); if ui.button(name).clicked() { self.open_local_path(shot); } } });
+                if shots.is_empty() {
+                    ui.label("Screenshots from this instance will appear here.");
+                } else {
+                    ui.horizontal_wrapped(|ui| {
+                        for shot in shots {
+                            let key = shot.to_string_lossy().to_string();
+                            if !self.screenshot_textures.contains_key(&key)
+                                && let Ok(image) = image::open(&shot)
+                            {
+                                let image = image.thumbnail(240, 160).to_rgba8();
+                                let size = [image.width() as usize, image.height() as usize];
+                                let pixels = image.into_raw();
+                                let color = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                                self.screenshot_textures.insert(key.clone(), ui.ctx().load_texture(format!("screenshot-{key}"), color, egui::TextureOptions::LINEAR));
+                            }
+                            if let Some(texture) = self.screenshot_textures.get(&key) {
+                                let response = ui.add(egui::Image::new((texture.id(), Vec2::new(160.0, 110.0))).sense(egui::Sense::click()));
+                                if response.clicked() { self.open_local_path(shot.clone()); }
+                            } else {
+                                ui.label(shot.file_name().unwrap_or_default().to_string_lossy());
+                            }
+                        }
+                    });
+                }
                 if ui.button("Open screenshots folder").clicked() { self.open_local_path(path.join("screenshots")); }
             }
             "Crash Logs" => {
