@@ -76,7 +76,7 @@ impl DownloadManager {
         if !matches!(parsed.scheme(), "http" | "https") {
             anyhow::bail!("Only HTTP and HTTPS download links are supported");
         }
-        let raw_name = parsed.path_segments().and_then(|segments| segments.last()).unwrap_or("download.bin");
+        let raw_name = parsed.path_segments().and_then(|mut segments| segments.next_back()).unwrap_or("download.bin");
         let filename = raw_name.split('?').next().unwrap_or("download.bin");
         let filename = filename.chars().map(|ch| if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') { ch } else { '_' }).collect::<String>();
         if filename.is_empty() || filename == "." || filename == ".." {
@@ -146,31 +146,31 @@ impl DownloadManager {
     }
 
     pub fn pause(&mut self, id: u64) {
-        if let Some(control) = self.controls.get(&id) {
-            if let Ok(mut state) = control.0.lock() {
-                state.paused = true;
-                if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Paused; }
-            }
+        if let Some(control) = self.controls.get(&id)
+            && let Ok(mut state) = control.0.lock()
+        {
+            state.paused = true;
+            if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Paused; }
         }
     }
 
     pub fn resume(&mut self, id: u64) {
-        if let Some(control) = self.controls.get(&id) {
-            if let Ok(mut state) = control.0.lock() {
-                state.paused = false;
-                control.1.notify_all();
-                if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Downloading; }
-            }
+        if let Some(control) = self.controls.get(&id)
+            && let Ok(mut state) = control.0.lock()
+        {
+            state.paused = false;
+            control.1.notify_all();
+            if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Downloading; }
         }
     }
 
     pub fn cancel(&mut self, id: u64) {
-        if let Some(control) = self.controls.get(&id) {
-            if let Ok(mut state) = control.0.lock() {
-                state.cancelled = true;
-                state.paused = false;
-                control.1.notify_all();
-            }
+        if let Some(control) = self.controls.get(&id)
+            && let Ok(mut state) = control.0.lock()
+        {
+            state.cancelled = true;
+            state.paused = false;
+            control.1.notify_all();
         }
     }
 

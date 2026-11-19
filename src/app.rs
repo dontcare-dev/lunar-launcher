@@ -1274,12 +1274,12 @@ impl LunarApp {
                     let destination = self.game_root.join("exports").join(format!("{}.lunarpack", item.id));
                     match crate::workspace::export_instance(&path, &destination) { Ok(()) => self.status = format!("Exported instance to {}", destination.display()), Err(error) => self.status = error.to_string() }
                 }
-                if ui.button("Import instance pack").clicked() {
-                    if let Some(source) = Self::choose_archive_file(false) {
-                        match crate::workspace::import_instance(&source, &self.game_root, "Imported Instance") {
-                            Ok(imported) => { self.workspace_selected = Some(imported.id); self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = "Instance pack imported".into(); }
-                            Err(error) => self.status = error.to_string(),
-                        }
+                if ui.button("Import instance pack").clicked()
+                    && let Some(source) = Self::choose_archive_file(false)
+                {
+                    match crate::workspace::import_instance(&source, &self.game_root, "Imported Instance") {
+                        Ok(imported) => { self.workspace_selected = Some(imported.id); self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = "Instance pack imported".into(); }
+                        Err(error) => self.status = error.to_string(),
                     }
                 }
             }
@@ -1385,6 +1385,8 @@ impl LunarApp {
                             ui.vertical(|ui| {
                                 ui.label(RichText::new(&task.filename).strong());
                                 ui.label(RichText::new(task.state.label()).size(10.0).color(Color32::GRAY));
+                                ui.label(RichText::new(task.destination.display().to_string()).size(9.0).color(Color32::GRAY));
+                                ui.label(RichText::new(&task.url).size(9.0).color(Color32::GRAY));
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if task.state == crate::downloads::DownloadState::Paused {
