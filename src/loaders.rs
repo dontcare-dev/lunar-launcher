@@ -57,10 +57,23 @@ fn merge(mut base: InstalledVersion, profile: &Value, instance: &Path, root: &Pa
     }
     if let Some(legacy) = profile.get("minecraftArguments").and_then(Value::as_str) { base.metadata["minecraftArguments"] = json!(legacy); }
     if let Some(java) = profile.get("javaVersion") { base.metadata["javaVersion"] = java.clone(); }
+    let original_directory = base.directory.clone();
+    let original_jar = original_directory.join(format!("{}.jar", base.id));
     base.id = profile.get("id").and_then(Value::as_str).unwrap_or(&base.id).to_owned();
+    let profile_directory = root.join("versions").join(&base.id);
+    fs::create_dir_all(&profile_directory)?;
+    let profile_jar = profile_directory.join(format!("{}.jar", base.id));
+    if !profile_jar.exists() {
+        fs::copy(&original_jar, &profile_jar).context("Could not prepare the Fabric game profile")?;
+    }
+    base.directory = profile_directory.clone();
     base.game_directory = Some(instance.to_path_buf());
-    base.natives = root.join("versions").join(&base.id).join("natives");
+    base.natives = profile_directory.join("natives");
     fs::create_dir_all(&base.natives)?;
+    base.metadata["id"] = json!(base.id);
+    base.metadata["jar"] = json!(base.id);
+    fs::write(profile_directory.join(format!("{}.json", base.id)), serde_json::to_vec_pretty(&base.metadata)?)?;
+    fs::write(profile_directory.join(".lunar-installed"), base.id.as_bytes())?;
     Ok(base)
 }
 
@@ -128,7 +141,26 @@ fn neoforge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<I
     generated_profile(mc, root, instance, "neoforge")
 }
 
-pub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
+
+#[derive(serde::Deserialize)]
+struct FabricLoaderEntry {
+    loader: FabricLoaderInfo,
+}
+
+#[derive(serde::Deserialize)]
+struct FabricLoaderInfo {
+    version: String,
+    #[serde(default)]
+    stable: bool,
+}
+
+pub fn install_fabric_profile(mc: &str, root: &Path, instance: &Path) -> Result<InstalledVersion> {
+    let entries: Vec<FabricLoaderEntry> = fetch_profile(&format!("https://meta.fabricmc.net/v2/versions/loader/{mc}"))?;
+    let selected = entries.iter().find(|entry| entry.loader.stable).or_else(|| entries.first())
+        .context("No Fabric loader release is available for this Minecraft version")?;
+    fabric_or_quilt(mc, &selected.loader.version, instance, root, false)
+}
+\npub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
     match pack.loaders.iter().next() {
         Some((kind, version)) if kind == "fabric-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, false),
         Some((kind, version)) if kind == "quilt-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, true),
