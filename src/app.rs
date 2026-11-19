@@ -109,6 +109,7 @@ pub struct LunarApp {
     splash_complete: bool,
     game_process: Option<Child>,
     content_kind: String,
+    content_results_kind: String,
     content_query: String,
     content_results: Vec<crate::content::Project>,
     content_images: std::collections::BTreeMap<String, egui::TextureHandle>,
@@ -196,6 +197,7 @@ impl LunarApp {
             splash_complete: false,
             game_process: None,
             content_kind: "modpack".into(),
+            content_results_kind: "modpack".into(),
             content_query: String::new(),
             content_results: Vec::new(),
             content_images: std::collections::BTreeMap::new(),
@@ -926,8 +928,28 @@ impl LunarApp {
 
 
     fn content(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Content", "Install and manage Minecraft content without manual file handling.");
-        if self.content_kind == "mod" {
+        let (page_title, page_description) = match self.content_kind.as_str() {
+            "modpack" => ("Modpack Browser", "Discover complete Minecraft setups and install them as isolated instances."),
+            "resourcepack" => ("Resource Pack Manager", "Find, install and manage visual resource packs for your selected instance."),
+            "shader" => ("Shader Manager", "Discover shader packs and keep them separate from mods and resource packs."),
+            _ => ("Mod Manager", "Browse compatible mods and install them into the selected Minecraft instance."),
+        };
+        Self::heading(ui, page_title, page_description);
+        if self.content_results_kind != self.content_kind && !self.content_busy {
+            self.content_results.clear();
+            self.content_images.clear();
+            let query = self.content_query.clone();
+            let kind = self.content_kind.clone();
+            let (tx, rx) = mpsc::channel();
+            self.content_search_rx = Some(rx);
+            self.content_busy = true;
+            self.content_results_kind = kind.clone();
+            self.status = format!("Loading {page_title}…");
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string()));
+            });
+        }
+        if self.content_kind == "mod" || self.content_kind == "resourcepack" || self.content_kind == "shader" {
             let selected = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| entry.name.as_str()).unwrap_or("Global Minecraft folder");
             ui.label(format!("Mod install destination: {selected}"));
         }
@@ -982,7 +1004,10 @@ impl LunarApp {
                 let (tx, rx) = mpsc::channel();
                 self.content_search_rx = Some(rx);
                 self.content_busy = true;
-                self.status = "Searching Modrinth…".into();
+                self.content_results.clear();
+                self.content_images.clear();
+                self.content_results_kind = kind.clone();
+                self.status = format!("Searching {page_title}…");
                 std::thread::spawn(move || { let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string())); });
             }
         });
@@ -993,7 +1018,10 @@ impl LunarApp {
             _ => "Install mods into your Minecraft mods folder.",
         };
         ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
-        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+        if self.content_busy {
+            ui.horizontal(|ui| { ui.spinner(); ui.label(format!("Loading {}…", page_title.to_lowercase())); });
+        }
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
             for project in self.content_results.clone() {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
@@ -1040,7 +1068,8 @@ impl LunarApp {
                 });
             }
         });
-        ui.add_space(8.0);
+        if self.content_kind == "modpack" {
+        ui.add_space(12.0);
         ui.label(RichText::new("INSTALLED MODPACKS").strong().size(11.0).color(self.accent));
         if self.installed_packs.is_empty() { ui.label(RichText::new("No modpacks installed.").size(11.0).color(Color32::GRAY)); }
         for pack in self.installed_packs.clone() {
@@ -1070,8 +1099,10 @@ impl LunarApp {
                 });
             });
         }
-        ui.add_space(8.0);
-        ui.label(RichText::new("RESOURCE PACKS").strong().size(11.0).color(self.accent));
+        }
+        if self.content_kind == "resourcepack" {
+        ui.add_space(12.0);
+        ui.label(RichText::new("INSTALLED RESOURCE PACKS").strong().size(11.0).color(self.accent));
         for file in crate::content::list_files(&self.game_root, "resourcepacks").unwrap_or_default() {
             if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
                 ui.horizontal(|ui| {
@@ -1091,6 +1122,9 @@ impl LunarApp {
                 });
             }
         }
+        }
+        if self.content_kind == "mod" {
+        ui.add_space(12.0);
         ui.label(RichText::new("INSTALLED MODS").strong().size(11.0).color(self.accent));
         for file in crate::content::list_files(&self.game_root, "mods").unwrap_or_default() {
             if let Some(filename) = file.file_name().and_then(|name| name.to_str()) {
@@ -1105,8 +1139,28 @@ impl LunarApp {
                 });
             }
         }
+        }
+        if self.content_kind == "shader" {
+            ui.add_space(12.0);
+            ui.label(RichText::new("INSTALLED SHADERS").strong().size(11.0).color(self.accent));
+            let shader_files = crate::content::list_files(&self.game_root, "shaderpacks").unwrap_or_default();
+            if shader_files.is_empty() { ui.label(RichText::new("No shader packs installed yet.").size(11.0).color(Color32::GRAY)); }
+            for file in shader_files {
+                let filename = file.file_name().and_then(|name| name.to_str()).unwrap_or("shader").to_owned();
+                ui.horizontal(|ui| {
+                    ui.label(&filename);
+                    if ui.small_button("Remove").clicked() {
+                        match crate::content::remove_file(&file, &self.game_root, "shaderpacks") {
+                            Ok(()) => self.status = format!("Removed {filename}"),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                });
+            }
+        }
+        if self.content_kind == "resourcepack" || self.content_kind == "mod" || self.content_kind == "shader" {
         ui.horizontal(|ui| {
-            for (label, folder) in [("Open resource packs", "resourcepacks"), ("Open mods", "mods")] {
+            for (label, folder) in [("Open resource packs", "resourcepacks"), ("Open mods", "mods"), ("Open shaders", "shaderpacks")] {
                 if ui.button(label).clicked() {
                     let path = self.game_root.join(folder);
                     let _ = fs::create_dir_all(&path);
@@ -1117,7 +1171,8 @@ impl LunarApp {
                 }
             }
         });
-        if self.content_busy || self.modpack_launch_rx.is_some() { ui.spinner(); }
+        }
+        if self.modpack_launch_rx.is_some() { ui.spinner(); }
     }
 
     fn servers(&mut self, ui: &mut egui::Ui) {
