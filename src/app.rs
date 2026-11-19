@@ -1284,7 +1284,13 @@ impl LunarApp {
                 }
             }
             "Mods" => {
-                ui.label("Per-instance mods. Disable a mod without deleting it, or remove it permanently.");
+                ui.label("Per-instance mods. Add local JAR files, disable mods without deleting them, or remove them permanently.");
+                if ui.button("Add mod JAR").clicked() && let Some(source) = Self::choose_content_file("mod") {
+                    match crate::workspace::import_content_file(&source, &path.join("mods"), &["jar"]) {
+                        Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
                 for file in crate::workspace::list_files(&path.join("mods"), &["jar", "disabled"]).unwrap_or_default() {
                     let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("mod").to_owned();
                     let enabled = !filename.ends_with(".jar.disabled");
@@ -1301,7 +1307,13 @@ impl LunarApp {
                 if ui.button("Open mods folder").clicked() { self.open_local_path(path.join("mods")); }
             }
             "Resource Packs" => {
-                ui.label("Enable or disable resource packs for this instance. Changes apply after restarting Minecraft.");
+                ui.label("Import ZIP packs, enable or disable them, and remove packs from this instance.");
+                if ui.button("Add resource-pack ZIP").clicked() && let Some(source) = Self::choose_content_file("resourcepack") {
+                    match crate::workspace::import_content_file(&source, &path.join("resourcepacks"), &["zip"]) {
+                        Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
                 for file in crate::workspace::list_files(&path.join("resourcepacks"), &["zip"]).unwrap_or_default() {
                     let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("pack").to_owned();
                     let mut enabled = crate::content::resource_pack_enabled(&path, &filename);
@@ -1315,7 +1327,13 @@ impl LunarApp {
                 if ui.button("Open resource packs folder").clicked() { self.open_local_path(path.join("resourcepacks")); }
             }
             "Shaders" => {
-                ui.label("Shader packs are stored separately from resource packs. Add ZIP shader packs here and select them in Minecraft video settings.");
+                ui.label("Import shader ZIP files, then select an installed shader in Minecraft video settings.");
+                if ui.button("Add shader-pack ZIP").clicked() && let Some(source) = Self::choose_content_file("shader") {
+                    match crate::workspace::import_content_file(&source, &path.join("shaderpacks"), &["zip"]) {
+                        Ok(destination) => self.status = format!("Added {}", destination.file_name().unwrap_or_default().to_string_lossy()),
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
                 for file in crate::workspace::list_files(&path.join("shaderpacks"), &["zip", "jar"]).unwrap_or_default() {
                     let filename = file.file_name().and_then(|value| value.to_str()).unwrap_or("shader").to_owned();
                     ui.horizontal(|ui| { ui.label(filename.clone()); if ui.small_button("Remove").clicked() { match fs::remove_file(&file) { Ok(()) => self.status = format!("Removed {filename}"), Err(error) => self.status = error.to_string() } } });
@@ -1430,6 +1448,24 @@ impl LunarApp {
             if save { command.args(["--file-selection", "--save", "--confirm-overwrite", "--file-filter=Lunar instance | *.lunarpack"]); }
             else { command.args(["--file-selection", "--file-filter=Lunar instance | *.lunarpack"]); }
             command.output().ok().or_else(|| Command::new("kdialog").args(if save { vec!["--getsavefilename", ".", "*.lunarpack"] } else { vec!["--getopenfilename", ".", "*.lunarpack"] }).output().ok())?
+        };
+        if !output.status.success() { return None; }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        (!value.is_empty()).then(|| PathBuf::from(value))
+    }
+
+    fn choose_content_file(kind: &str) -> Option<PathBuf> {
+        let (filter, description) = match kind {
+            "mod" => ("*.jar", "Minecraft mod (*.jar)"),
+            "resourcepack" | "shader" => ("*.zip", "ZIP archive (*.zip)"),
+            _ => return None,
+        };
+        let output = if cfg!(target_os = "windows") {
+            let script = format!("Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='{}|{}'; if($d.ShowDialog() -eq 'OK'){{[Console]::Write($d.FileName)}}", description, filter);
+            Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().ok()?
+        } else {
+            Command::new("zenity").args(["--file-selection", &format!("--file-filter={description} | {filter}")]).output().ok()
+                .or_else(|| Command::new("kdialog").args(["--getopenfilename", ".", filter]).output().ok())?
         };
         if !output.status.success() { return None; }
         let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();

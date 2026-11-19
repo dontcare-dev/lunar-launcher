@@ -151,27 +151,76 @@ pub fn backup_world(instance: &Path, world: &str) -> Result<PathBuf> {
     Ok(output)
 }
 
+pub fn import_content_file(source: &Path, destination: &Path, extensions: &[&str]) -> Result<PathBuf> {
+    if !source.is_file() { bail!("Selected content file was not found"); }
+    let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !extensions.iter().any(|allowed| *allowed == extension) { bail!("This file type is not supported here"); }
+    let name = source.file_name().context("Selected file has no filename")?;
+    fs::create_dir_all(destination)?;
+    let mut target = destination.join(name);
+    if target.exists() {
+        let stem = source.file_stem().and_then(|value| value.to_str()).unwrap_or("content");
+        let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("");
+        let mut suffix = 2usize;
+        loop {
+            let filename = if extension.is_empty() { format!("{stem}-{suffix}") } else { format!("{stem}-{suffix}.{extension}") };
+            target = destination.join(filename);
+            if !target.exists() { break; }
+            suffix += 1;
+        }
+    }
+    let temporary = target.with_extension(format!("{}.part", target.extension().and_then(|value| value.to_str()).unwrap_or("file")));
+    fs::copy(source, &temporary)?;
+    fs::rename(&temporary, &target)?;
+    Ok(target)
+}
+
 pub fn restore_world(archive_path: &Path, instance: &Path) -> Result<String> {
     let file = fs::File::open(archive_path)?;
     let mut archive = ZipArchive::new(file).context("Backup is not a valid ZIP archive")?;
-    let mut extracted = 0usize;
     let saves = instance.join("saves");
     fs::create_dir_all(&saves)?;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index)?;
-        let Some(relative) = entry.enclosed_name() else { bail!("Backup contains an unsafe path"); };
-        if relative.as_os_str().is_empty() { continue; }
-        let destination = saves.join(&relative);
-        if entry.is_dir() { fs::create_dir_all(destination)?; }
-        else {
-            if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
-            let mut output = fs::File::create(destination)?;
-            std::io::copy(&mut entry, &mut output)?;
-            extracted += 1;
+    let staging = instance.join("backups").join(format!(".restore-{}", now()));
+    if staging.exists() { fs::remove_dir_all(&staging)?; }
+    fs::create_dir_all(&staging)?;
+    let result = (|| -> Result<String> {
+        let mut extracted = 0usize;
+        let mut world_name: Option<String> = None;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            let Some(relative) = entry.enclosed_name() else { bail!("Backup contains an unsafe path"); };
+            let mut components = relative.components();
+            let Some(std::path::Component::Normal(root)) = components.next() else { bail!("Backup has an invalid world folder"); };
+            if components.clone().any(|part| !matches!(part, std::path::Component::Normal(_))) { bail!("Backup contains an unsafe path"); }
+            let root_name = root.to_string_lossy().to_string();
+            if world_name.as_ref().is_some_and(|name| name != &root_name) { bail!("Backup contains more than one world folder"); }
+            world_name = Some(root_name);
+            let destination = staging.join(&relative);
+            if entry.is_dir() { fs::create_dir_all(destination)?; }
+            else {
+                if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
+                let mut output = fs::File::create(destination)?;
+                std::io::copy(&mut entry, &mut output)?;
+                extracted += 1;
+            }
         }
-    }
-    if extracted == 0 { bail!("Backup archive contains no world files"); }
-    Ok("World backup restored. Files with matching names may have been replaced.".into())
+        if extracted == 0 { bail!("Backup archive contains no world files"); }
+        let name = world_name.context("Backup does not contain a world folder")?;
+        let staged_world = staging.join(&name);
+        if !staged_world.is_dir() { bail!("Backup world folder is missing"); }
+        let destination = saves.join(&name);
+        let previous = staging.join(".previous-world");
+        let had_previous = destination.exists();
+        if had_previous { fs::rename(&destination, &previous)?; }
+        if let Err(error) = fs::rename(&staged_world, &destination) {
+            if had_previous { let _ = fs::rename(&previous, &destination); }
+            return Err(error.into());
+        }
+        if had_previous { fs::remove_dir_all(previous)?; }
+        Ok(format!("Restored {name} successfully."))
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    result
 }
 
 pub fn export_instance(instance: &Path, destination: &Path) -> Result<()> {
@@ -288,6 +337,21 @@ pub fn format_time(timestamp: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_import_rejects_wrong_extensions_and_avoids_overwrites() {
+        let root = std::env::temp_dir().join(format!("lunar-content-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("sample.jar");
+        fs::write(&source, b"mod").unwrap();
+        let destination = root.join("mods");
+        let first = import_content_file(&source, &destination, &["jar"]).unwrap();
+        let second = import_content_file(&source, &destination, &["jar"]).unwrap();
+        assert_ne!(first, second);
+        assert!(import_content_file(&source, &destination, &["zip"]).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn instance_names_are_safely_slugged() {
