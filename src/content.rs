@@ -303,7 +303,7 @@ fn download_mod_version(version: &ProjectVersion, directory: &Path, seen: &mut s
     let filename = safe_filename(&file.filename)?;
     if !filename.to_ascii_lowercase().ends_with(".jar") { bail!("Modrinth returned a non-JAR mod file"); }
     let mut paths = Vec::new();
-    let mut destination = directory.join(filename);
+    let destination = directory.join(filename);
     if !destination.exists() {
         let bytes = client()?.get(&file.url).send()?.error_for_status()?.bytes()?;
         if bytes.is_empty() { bail!("The downloaded mod file was empty"); }
