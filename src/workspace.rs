@@ -526,7 +526,7 @@ mod tests {
     fn instance_archive_round_trips_manifest_and_files() {
         let root = std::env::temp_dir().join(format!("lunar-instance-archive-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let instance = root.join("source");
+        let instance = root.join("instances").join("source");
         fs::create_dir_all(instance.join("mods")).unwrap();
         let item = Instance { id: "source".into(), name: "Source".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: Some("fabric".into()) };
         save_instance(&root, &item).unwrap();
