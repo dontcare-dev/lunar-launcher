@@ -251,7 +251,7 @@ pub fn search(root: &Path, query: &str) -> Result<Vec<String>> {
 pub fn read_tail(path: &Path, max_lines: usize) -> Result<String> {
     let text = fs::read_to_string(path)?;
     let lines = text.lines().collect::<Vec<_>>();
-    Ok(lines.iter().rev().take(max_lines).map(|line| *line).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+    Ok(lines.iter().rev().take(max_lines).copied().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 
 pub fn system_memory_mb() -> Option<(u64, u64)> {
