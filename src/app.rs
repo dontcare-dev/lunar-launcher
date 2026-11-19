@@ -380,7 +380,7 @@ impl LunarApp {
             return;
         }
         let rect = ctx.screen_rect();
-        let painter = ctx.layer_painter(egui::LayerId::foreground());
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("lunar-splash")));
         painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(4, 7, 16, 246));
         let center = rect.center();
         let pulse = (elapsed * 2.4).sin() * 0.5 + 0.5;
