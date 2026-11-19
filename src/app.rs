@@ -1668,6 +1668,13 @@ impl LunarApp {
                                         Err(error) => self.status = error.to_string(),
                                     }
                                 }
+                                if ui.small_button("Export ZIP").clicked() {
+                                    let destination = path.join("backups").join(format!("{}-export.zip", name.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' }).collect::<String>()));
+                                    match crate::workspace::export_world(&path, &name, &destination) {
+                                        Ok(()) => self.status = format!("World exported to {}", destination.display()),
+                                        Err(error) => self.status = error.to_string(),
+                                    }
+                                }
                                 if ui.small_button("Rename").clicked() {
                                     self.world_rename_target = Some(name.clone());
                                     self.world_rename_value = name.clone();
