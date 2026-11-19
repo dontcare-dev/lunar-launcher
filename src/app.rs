@@ -225,7 +225,7 @@ impl LunarApp {
         } else if cfg!(target_os = "macos") {
             Command::new("osascript").args(["-e", "POSIX path of (choose file of type {\"com.compuserve.gif\"})"]).output().ok()?
         } else {
-            Command::new("zenity").args(["--file-selection", "--title=Choose LUNAR background GIF", "--file-filter=GIF images | *.gif"]).output()
+            Command::new("zenity").args(["--file-selection", "--title=Choose Lunar Launcher background GIF", "--file-filter=GIF images | *.gif"]).output()
                 .or_else(|_| Command::new("kdialog").args(["--getopenfilename", ".", "*.gif"]).output()).ok()?
         };
         if !output.status.success() {
@@ -392,7 +392,7 @@ impl LunarApp {
         let moon = center + egui::vec2(-15.0, -18.0);
         painter.circle_filled(moon, 36.0, Color32::from_rgb(174, 195, 255));
         painter.circle_filled(moon + egui::vec2(18.0, -12.0), 32.0, Color32::from_rgb(7, 11, 23));
-        painter.text(center + egui::vec2(0.0, 116.0), egui::Align2::CENTER_CENTER, "LUNAR LAUNCHER", FontId::proportional(23.0), Color32::WHITE);
+        painter.text(center + egui::vec2(0.0, 116.0), egui::Align2::CENTER_CENTER, "Lunar Launcher", FontId::proportional(23.0), Color32::WHITE);
         painter.text(center + egui::vec2(0.0, 148.0), egui::Align2::CENTER_CENTER, "A better way to play", FontId::proportional(12.0), Color32::from_rgb(151, 165, 195));
         let bar = egui::Rect::from_center_size(center + egui::vec2(0.0, 190.0), egui::vec2(160.0, 3.0));
         painter.rect_filled(bar, 2.0, Color32::from_rgb(33, 42, 66));
@@ -1135,7 +1135,7 @@ impl LunarApp {
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Settings", "Make LUNAR feel like yours.");
+        Self::heading(ui, "Settings", "Make Lunar Launcher feel like yours.");
         let previous_memory = self.memory_mb;
         let previous_performance = self.performance_mode.clone();
         ui.group(|ui| {
@@ -1196,7 +1196,7 @@ impl LunarApp {
                 "Maximum FPS" => "2-chunk render distance, 2 simulation distance, fast graphics and a high FPS ceiling",
                 "Performance" => "4-chunk render distance, reduced effects and no VSync",
                 "Balanced" => "8-chunk render distance with moderate visual settings",
-                _ => "LUNAR will not overwrite your Minecraft video settings",
+                _ => "Lunar Launcher will not overwrite your Minecraft video settings",
             };
             ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
             if ui.checkbox(&mut self.auto_sodium, "Automatically install Fabric + Sodium for vanilla launches").changed() {
