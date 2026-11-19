@@ -1026,8 +1026,8 @@ impl LunarApp {
                                 self.status = format!("Installing {}…", project.title);
                                 std::thread::spawn(move || {
                                     let result = match kind.as_str() {
-                                        "resourcepack" => crate::content::install_resource_pack(&id, &root),
-                                        "shader" => crate::content::install_shader_pack(&id, &root),
+                                        "resourcepack" => crate::content::install_resource_pack(&id, instance_target.as_deref().unwrap_or(&root)),
+                                        "shader" => crate::content::install_shader_pack(&id, instance_target.as_deref().unwrap_or(&root)),
                                         "mod" => crate::content::install_mod(&id, instance_target.as_deref().unwrap_or(&root), &minecraft, &loader),
                                         _ => crate::content::install_modpack(&id, &root),
                                     }.map_err(|error| format!("{error:#}"));
