@@ -139,6 +139,84 @@ fn add_directory(writer: &mut ZipWriter<fs::File>, root: &Path, current: &Path) 
     Ok(())
 }
 
+pub fn list_worlds(instance: &Path) -> Result<Vec<(String, u64, u64)>> {
+    let saves = instance.join("saves");
+    if !saves.exists() { return Ok(Vec::new()); }
+    let mut worlds = Vec::new();
+    for entry in fs::read_dir(saves)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() { continue; }
+        let metadata = entry.metadata()?;
+        let modified = metadata.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map(|duration| duration.as_secs()).unwrap_or(0);
+        let size = directory_size(&entry.path()).unwrap_or(0);
+        worlds.push((entry.file_name().to_string_lossy().to_string(), size, modified));
+    }
+    worlds.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+    Ok(worlds)
+}
+
+fn directory_size(path: &Path) -> Result<u64> {
+    let mut total = 0u64;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() { total = total.saturating_add(directory_size(&entry.path())?); }
+        else if entry.file_type()?.is_file() { total = total.saturating_add(entry.metadata()?.len()); }
+    }
+    Ok(total)
+}
+
+fn safe_world_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() || name == "." || name == ".." || name.contains(['/', '\\\\', ':']) || name.chars().any(char::is_control) {
+        bail!("World names cannot be empty or contain path separators");
+    }
+    Ok(())
+}
+
+pub fn rename_world(instance: &Path, old_name: &str, new_name: &str) -> Result<()> {
+    safe_world_name(old_name)?;
+    safe_world_name(new_name)?;
+    let saves = instance.join("saves").canonicalize()?;
+    let source = saves.join(old_name);
+    let target = saves.join(new_name);
+    if !source.is_dir() { bail!("World was not found"); }
+    if target.exists() { bail!("A world with that name already exists"); }
+    fs::rename(source, target)?;
+    Ok(())
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() { copy_directory(&entry.path(), &target)?; }
+        else if entry.file_type()?.is_file() { fs::copy(entry.path(), target)?; }
+    }
+    Ok(())
+}
+
+pub fn duplicate_world(instance: &Path, world: &str, new_name: &str) -> Result<()> {
+    safe_world_name(world)?;
+    safe_world_name(new_name)?;
+    let saves = instance.join("saves").canonicalize()?;
+    let source = saves.join(world);
+    let destination = saves.join(new_name);
+    if !source.is_dir() { bail!("World was not found"); }
+    if destination.exists() { bail!("A world with that name already exists"); }
+    copy_directory(&source, &destination)
+}
+
+pub fn delete_world(instance: &Path, world: &str) -> Result<()> {
+    safe_world_name(world)?;
+    let saves = instance.join("saves").canonicalize()?;
+    let target = saves.join(world).canonicalize()?;
+    if !target.starts_with(&saves) || !target.is_dir() || !target.join("level.dat").is_file() {
+        bail!("Selected folder is not a Minecraft world");
+    }
+    fs::remove_dir_all(target)?;
+    Ok(())
+}
+
 pub fn backup_world(instance: &Path, world: &str) -> Result<PathBuf> {
     if world.is_empty() || world.contains(['/', '\\']) || world == "." || world == ".." { bail!("Invalid world name"); }
     let source = instance.join("saves").join(world);
