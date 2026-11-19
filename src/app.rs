@@ -1,17 +1,19 @@
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
-use std::{fs, path::PathBuf, process::{Child, Command}, sync::mpsc::{self, Receiver, TryRecvError}};
+use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
+use std::{fs, io::BufReader, path::PathBuf, process::{Child, Command}, sync::{mpsc::{self, Receiver, TryRecvError}, Arc}, time::{Duration, Instant}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct LauncherPreferences {
     memory_mb: u32,
     snapshots: bool,
+    background_gif: String,
 }
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new() }
     }
 }
 
@@ -108,17 +110,23 @@ pub struct LunarApp {
     server_address: String,
     server_statuses: std::collections::BTreeMap<String, crate::server::ServerStatus>,
     server_rx: Option<Receiver<ServerPingResults>>,
+    background_gif: String,
+    background_frames: Vec<(egui::ColorImage, u64)>,
+    background_texture: Option<egui::TextureHandle>,
+    background_frame: usize,
+    background_next: Instant,
+    background_rx: Option<Receiver<Result<Vec<(egui::ColorImage, u64)>, String>>>,
 }
 
 impl LunarApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals.dark_mode = true;
-        style.visuals.window_fill = Color32::from_rgb(8, 10, 16);
-        style.visuals.panel_fill = Color32::from_rgb(10, 13, 21);
-        style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(18, 22, 33);
-        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(24, 29, 43);
-        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(39, 49, 70);
+        style.visuals.window_fill = Color32::from_rgb(5, 8, 16);
+        style.visuals.panel_fill = Color32::from_rgba_unmultiplied(10, 14, 25, 168);
+        style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgba_unmultiplied(20, 27, 43, 148);
+        style.visuals.widgets.inactive.bg_fill = Color32::from_rgba_unmultiplied(29, 37, 57, 168);
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgba_unmultiplied(53, 69, 103, 205);
         style.visuals.widgets.active.bg_fill = Color32::from_rgb(91, 116, 190);
         style.visuals.window_corner_radius = egui::CornerRadius::same(16);
         style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(10);
@@ -128,6 +136,7 @@ impl LunarApp {
         style.visuals.selection.bg_fill = Color32::from_rgb(75, 98, 160);
         style.spacing.button_padding = Vec2::new(15.0, 9.0);
         style.spacing.item_spacing = Vec2::new(12.0, 12.0);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx.set_style(style);
 
         let game_root = launcher::game_directory().unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(".lunar-data"));
@@ -171,9 +180,148 @@ impl LunarApp {
             server_address: String::new(),
             server_statuses: std::collections::BTreeMap::new(),
             server_rx: None,
+            background_gif: preferences.background_gif.clone(),
+            background_frames: Vec::new(),
+            background_texture: None,
+            background_frame: 0,
+            background_next: Instant::now(),
+            background_rx: None,
         };
         app.refresh_versions();
+        if !app.background_gif.is_empty() {
+            let path = app.background_gif.clone();
+            app.load_background_gif(path);
+        }
         app
+    }
+
+    fn choose_gif_file() -> Option<String> {
+        let output = if cfg!(target_os = "windows") {
+            let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Filter = 'GIF images (*.gif)|*.gif'; $d.Multiselect = $false; if ($d.ShowDialog() -eq 'OK') { [Console]::Write($d.FileName) }";
+            Command::new("powershell").args(["-NoProfile", "-Command", script]).output().ok()?
+        } else if cfg!(target_os = "macos") {
+            Command::new("osascript").args(["-e", "POSIX path of (choose file of type {\"com.compuserve.gif\"})"]).output().ok()?
+        } else {
+            Command::new("zenity").args(["--file-selection", "--title=Choose LUNAR background GIF", "--file-filter=GIF images | *.gif"]).output()
+                .or_else(|_| Command::new("kdialog").args(["--getopenfilename", ".", "*.gif"]).output()).ok()?
+        };
+        if !output.status.success() {
+            return None;
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        (!path.is_empty()).then_some(path)
+    }
+
+    fn load_background_gif(&mut self, path: String) {
+        self.background_gif = path.clone();
+        LauncherPreferences {
+            memory_mb: self.memory_mb,
+            snapshots: self.snapshots,
+            background_gif: self.background_gif.clone(),
+        }.save();
+        let (tx, rx) = mpsc::channel();
+        self.background_rx = Some(rx);
+        self.status = "Loading animated background…".into();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<Vec<(egui::ColorImage, u64)>, String> {
+                let file = fs::File::open(&path).map_err(|error| error.to_string())?;
+                let decoder = GifDecoder::new(BufReader::new(file)).map_err(|error| error.to_string())?;
+                let decoded = decoder.into_frames().take(180).collect_frames().map_err(|error| error.to_string())?;
+                if decoded.is_empty() {
+                    return Err("The selected GIF contains no frames".into());
+                }
+                let mut frames = Vec::with_capacity(decoded.len());
+                for frame in decoded {
+                    let delay = frame.delay().numer_denom_ms();
+                    let delay_ms = (delay.0 / delay.1.max(1)).clamp(60, 1200) as u64;
+                    let mut image = frame.into_buffer();
+                    let (width, height) = image.dimensions();
+                    let scale = (1600.0_f32 / width as f32).min(1000.0_f32 / height as f32).min(1.0);
+                    if scale < 1.0 {
+                        image = image::imageops::resize(
+                            &image,
+                            (width as f32 * scale) as u32,
+                            (height as f32 * scale) as u32,
+                            FilterType::Triangle,
+                        );
+                    }
+                    let image = image::imageops::blur(&image, 5.5);
+                    let color = egui::ColorImage::from_rgba_unmultiplied(
+                        [image.width() as usize, image.height() as usize],
+                        image.as_raw(),
+                    );
+                    frames.push((color, delay_ms));
+                }
+                Ok(frames)
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
+    fn poll_background(&mut self, ctx: &egui::Context) {
+        let result = self.background_rx.as_ref().map(Receiver::try_recv);
+        match result {
+            Some(Ok(Ok(frames))) => {
+                self.background_frames = frames;
+                self.background_frame = 0;
+                if let Some((image, delay)) = self.background_frames.first() {
+                    self.background_texture = Some(ctx.load_texture(
+                        "lunar-animated-background",
+                        image.clone(),
+                        egui::TextureOptions::LINEAR,
+                    ));
+                    self.background_next = Instant::now() + Duration::from_millis(*delay);
+                }
+                self.background_rx = None;
+                self.status = "Animated background applied".into();
+            }
+            Some(Ok(Err(error))) => {
+                self.background_rx = None;
+                self.status = format!("Could not load GIF: {error}");
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.background_rx = None;
+                self.status = "GIF loading stopped unexpectedly".into();
+            }
+            _ => {}
+        }
+        if !self.background_frames.is_empty() {
+            if Instant::now() >= self.background_next {
+                self.background_frame = (self.background_frame + 1) % self.background_frames.len();
+                if let Some((image, delay)) = self.background_frames.get(self.background_frame) {
+                    if let Some(texture) = &mut self.background_texture {
+                        texture.set(image.clone(), egui::TextureOptions::LINEAR);
+                    }
+                    self.background_next = Instant::now() + Duration::from_millis(*delay);
+                }
+            }
+            ctx.request_repaint_after(Duration::from_millis(35));
+        }
+        if self.background_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+    }
+
+    fn paint_background(&self, ctx: &egui::Context) {
+        let rect = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        if let Some(texture) = &self.background_texture {
+            painter.image(
+                texture.id(),
+                rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(4, 7, 15, 158));
+        painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(24, 30, 53, 34));
+    }
+
+    fn svg_icon(ui: &mut egui::Ui, uri: &'static str, data: &'static [u8], size: f32) {
+        ui.add(
+            egui::Image::from_bytes(uri, data.to_vec())
+                .fit_to_exact_size(Vec2::splat(size)),
+        );
     }
 
     fn refresh_versions(&mut self) {
@@ -330,14 +478,16 @@ impl LunarApp {
         ui.add_space(20.0);
     }
 
-    fn nav_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    fn nav_button(ui: &mut egui::Ui, label: &str, active: bool, uri: &'static str, icon: &'static [u8]) -> egui::Response {
         let text = if active {
             RichText::new(label).color(Color32::WHITE).strong()
         } else {
-            RichText::new(label).color(Color32::from_rgb(157, 166, 185))
+            RichText::new(label).color(Color32::from_rgb(174, 183, 204))
         };
-        ui.add_sized([174.0, 38.0], egui::Button::new(text).fill(
-            if active { Color32::from_rgb(43, 57, 82) } else { Color32::TRANSPARENT }
+        let image = egui::Image::from_bytes(uri, icon.to_vec())
+            .fit_to_exact_size(Vec2::splat(18.0));
+        ui.add_sized([178.0, 42.0], egui::Button::image_and_text(image, text).fill(
+            if active { Color32::from_rgba_unmultiplied(83, 105, 160, 150) } else { Color32::TRANSPARENT }
         ).stroke(Stroke::NONE))
     }
 
@@ -345,24 +495,25 @@ impl LunarApp {
         egui::SidePanel::left("lunar_navigation")
             .exact_width(218.0)
             .resizable(false)
-            .frame(egui::Frame::new().fill(Color32::from_rgb(9, 12, 19)).inner_margin(egui::Margin::same(18)))
+            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::same(18)))
             .show(ctx, |ui| {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("◒").size(27.0).color(self.accent).strong());
+                    Self::svg_icon(ui, "bytes://lunar-brand.svg", include_bytes!("../assets/icons/globe.svg"), 28.0);
                     ui.label(RichText::new("LUNAR").size(21.0).strong());
                 });
                 ui.add_space(34.0);
-                for (label, screen) in [
-                    ("Home", Screen::Home),
-                    ("Play", Screen::Play),
-                    ("Versions", Screen::Versions),
-                    ("Profiles", Screen::Profiles),
-                    ("Content", Screen::Content),
-                    ("Servers", Screen::Servers),
-                    ("Settings", Screen::Settings),
-                ] {
-                    if Self::nav_button(ui, label, self.screen == screen).clicked() {
+                let navigation: [(&str, Screen, &'static str, &'static [u8]); 7] = [
+                    ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
+                    ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
+                    ("Versions", Screen::Versions, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
+                    ("Profiles", Screen::Profiles, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
+                    ("Content", Screen::Content, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                    ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
+                    ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
+                ];
+                for (label, screen, uri, icon) in navigation {
+                    if Self::nav_button(ui, label, self.screen == screen, uri, icon).clicked() {
                         self.screen = screen;
                     }
                 }
@@ -498,7 +649,7 @@ impl LunarApp {
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
             if previous_snapshots != self.snapshots {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone() }.save();
             }
         });
         if let Some(manifest) = &self.manifest {
@@ -813,10 +964,13 @@ impl LunarApp {
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Settings", "Launcher preferences.");
+        Self::heading(ui, "Settings", "Make LUNAR feel like yours.");
         let previous_memory = self.memory_mb;
         ui.group(|ui| {
-            ui.label(RichText::new("IDENTITY").strong());
+            ui.horizontal(|ui| {
+                Self::svg_icon(ui, "bytes://lunar-shield.svg", include_bytes!("../assets/icons/shield.svg"), 19.0);
+                ui.label(RichText::new("IDENTITY").strong());
+            });
             ui.label("Authentication mode: Offline profiles only");
             ui.label("Online account authentication is not included.");
         });
@@ -841,7 +995,10 @@ impl LunarApp {
         });
         ui.add_space(10.0);
         ui.group(|ui| {
-            ui.label(RichText::new("MEMORY ALLOCATION").strong());
+            ui.horizontal(|ui| {
+                Self::svg_icon(ui, "bytes://lunar-memory.svg", include_bytes!("../assets/icons/memory.svg"), 19.0);
+                ui.label(RichText::new("MEMORY ALLOCATION").strong());
+            });
             ui.add(egui::Slider::new(&mut self.memory_mb, 512..=16384).step_by(512.0).suffix(" MB"));
         });
         ui.add_space(10.0);
@@ -849,7 +1006,10 @@ impl LunarApp {
             LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots }.save();
         }
         ui.group(|ui| {
-            ui.label(RichText::new("GAME DIRECTORY").strong());
+            ui.horizontal(|ui| {
+                Self::svg_icon(ui, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg"), 19.0);
+                ui.label(RichText::new("GAME DIRECTORY").strong());
+            });
             ui.label(self.game_root.display().to_string());
             ui.label("Minecraft versions, libraries, assets and logs are stored locally.");
             if ui.button("Open game directory").clicked() {
@@ -874,6 +1034,41 @@ impl LunarApp {
                 self.status = result.map(|_| "Opened game log".to_owned()).unwrap_or_else(|error| format!("Could not open game log: {error}"));
             }
         });
+        ui.add_space(12.0);
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                Self::svg_icon(ui, "bytes://lunar-image.svg", include_bytes!("../assets/icons/image.svg"), 20.0);
+                ui.label(RichText::new("AMBIENT BACKGROUND").strong());
+            });
+            ui.label(RichText::new("Use a local GIF as the full-window animated backdrop. LUNAR softens and darkens it behind the glass panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_sized([ui.available_width() - 116.0, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
+                if ui.button("Browse").clicked() {
+                    if let Some(path) = Self::choose_gif_file() {
+                        self.background_gif = path;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Apply background").clicked() {
+                    if !self.background_gif.trim().is_empty() {
+                        self.load_background_gif(self.background_gif.trim().to_owned());
+                    }
+                }
+                if ui.button("Remove background").clicked() {
+                    self.background_gif.clear();
+                    self.background_frames.clear();
+                    self.background_texture = None;
+                    self.background_rx = None;
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new() }.save();
+                    self.status = "Animated background removed".into();
+                }
+            });
+            if self.background_rx.is_some() {
+                ui.horizontal(|ui| { ui.spinner(); ui.label("Preparing blurred animation…"); });
+            }
+        });
     }
 }
 
@@ -881,6 +1076,7 @@ impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
+        self.poll_background(ctx);
         if let Some(rx) = &self.content_search_rx
             && let Ok(result) = rx.try_recv()
         {
@@ -957,9 +1153,10 @@ impl eframe::App for LunarApp {
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
+        self.paint_background(ctx);
         self.sidebar(ctx);
         egui::TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::new().fill(Color32::from_rgb(12, 15, 22)).inner_margin(egui::Margin::symmetric(18, 8)))
+            .frame(egui::Frame::new().fill(Color32::from_rgba_unmultiplied(7, 10, 19, 178)).stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(180, 195, 235, 24))).inner_margin(egui::Margin::symmetric(18, 8)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("●").color(self.accent).size(9.0));
@@ -970,7 +1167,7 @@ impl eframe::App for LunarApp {
                 });
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::from_rgb(10, 13, 21)).inner_margin(egui::Margin::same(30)))
+            .frame(egui::Frame::new().fill(Color32::TRANSPARENT).inner_margin(egui::Margin::same(30)))
             .show(ctx, |ui| {
                 match self.screen {
                     Screen::Home => self.home(ui),
