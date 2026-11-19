@@ -246,6 +246,15 @@ pub fn backup_world(instance: &Path, world: &str) -> Result<PathBuf> {
     Ok(output)
 }
 
+pub fn backup_all_worlds(instance: &Path) -> Result<Vec<PathBuf>> {
+    let worlds = list_worlds(instance)?;
+    let mut backups = Vec::with_capacity(worlds.len());
+    for (name, _, _) in worlds {
+        backups.push(backup_world(instance, &name)?);
+    }
+    Ok(backups)
+}
+
 pub fn import_content_file(source: &Path, destination: &Path, extensions: &[&str]) -> Result<PathBuf> {
     if !source.is_file() { bail!("Selected content file was not found"); }
     let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
