@@ -15,6 +15,13 @@ fn main() {
         std::fs::write(&icon_path, make_ico(&rgba, size)).expect("Could not write moon ICO");
         let mut resource = winres::WindowsResource::new();
         resource.set_icon(icon_path.to_str().expect("Invalid icon path"));
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu")
+            && env::var("HOST").is_ok_and(|host| !host.contains("windows"))
+        {
+            resource
+                .set_windres_path("x86_64-w64-mingw32-windres")
+                .set_ar_path("x86_64-w64-mingw32-ar");
+        }
         resource.compile().expect("Could not embed the Lunar moon application icon");
     }
 }
