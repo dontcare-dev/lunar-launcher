@@ -193,6 +193,12 @@ impl LunarApp {
             background_rx: None,
         };
         app.refresh_versions();
+        let (content_tx, content_rx) = mpsc::channel();
+        app.content_search_rx = Some(content_rx);
+        app.content_busy = true;
+        std::thread::spawn(move || {
+            let _ = content_tx.send(crate::content::search("", "modpack").map_err(|error| error.to_string()));
+        });
         if !app.background_gif.is_empty() {
             let path = app.background_gif.clone();
             app.load_background_gif(path);
