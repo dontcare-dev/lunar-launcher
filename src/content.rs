@@ -113,6 +113,7 @@ fn project_versions(project_id: &str, game_versions: Option<&str>, loaders: Opti
 fn safe_filename(filename: &str) -> Result<&str> {
     let path = Path::new(filename);
     if filename.trim().is_empty()
+        || filename.contains(['/', '\\'])
         || path.file_name().and_then(|name| name.to_str()) != Some(filename)
         || path.components().count() != 1
         || !matches!(path.components().next(), Some(Component::Normal(_)))
@@ -432,4 +433,33 @@ pub fn set_resource_pack_enabled(root: &Path, filename: &str, enabled: bool) -> 
     if !inactive_written { output.push(format!("incompatibleResourcePacks:{}", serde_json::to_string(&inactive)?)); }
     fs::write(path, output.join("\n"))?;
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_filename_rejects_paths() {
+        assert!(safe_filename("valid-pack.zip").is_ok());
+        assert!(safe_filename("../outside.zip").is_err());
+        assert!(safe_filename("folder\\\\outside.zip").is_err());
+    }
+
+    #[test]
+    fn resource_pack_toggle_does_not_mark_disabled_packs_incompatible() {
+        let root = std::env::temp_dir().join(format!("lunar-resource-toggle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        set_resource_pack_enabled(&root, "sample.zip", true).unwrap();
+        let options = fs::read_to_string(root.join("options.txt")).unwrap();
+        assert!(options.contains("resourcePacks:[\\\"file/sample.zip\\\"]"));
+        assert!(options.contains("incompatibleResourcePacks:[]"));
+        set_resource_pack_enabled(&root, "sample.zip", false).unwrap();
+        let options = fs::read_to_string(root.join("options.txt")).unwrap();
+        assert!(options.contains("resourcePacks:[]"));
+        assert!(options.contains("incompatibleResourcePacks:[]"));
+        let _ = fs::remove_dir_all(root);
+    }
 }
