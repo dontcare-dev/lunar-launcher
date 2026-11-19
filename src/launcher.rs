@@ -514,11 +514,32 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
         }
     }
     let settings: &[(&str, &str)] = match mode {
+        "Maximum FPS" => &[
+            ("graphics", "fast"),
+            ("renderDistance", "2"),
+            ("simulationDistance", "2"),
+            ("maxFps", "260"),
+            ("enableVsync", "false"),
+            ("particles", "2"),
+            ("clouds", "0"),
+            ("biomeBlendRadius", "0"),
+            ("mipmapLevels", "0"),
+            ("entityShadows", "false"),
+            ("ao", "false"),
+            ("ambientOcclusion", "false"),
+            ("entityDistanceScaling", "0.5"),
+            ("renderClouds", "false"),
+            ("bobView", "false"),
+            ("fovEffectScale", "0.0"),
+            ("screenEffectScale", "0.0"),
+            ("distortionEffectScale", "0.0"),
+            ("useVbo", "true"),
+        ],
         "Performance" => &[
             ("graphics", "fast"),
             ("renderDistance", "4"),
             ("simulationDistance", "3"),
-            ("maxFps", "60"),
+            ("maxFps", "120"),
             ("enableVsync", "false"),
             ("particles", "2"),
             ("clouds", "0"),
