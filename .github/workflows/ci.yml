@@ -20,16 +20,8 @@ defaults:
 
 jobs:
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-      - if: runner.os == 'Windows'
-        run: New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE | Out-Null
-        shell: pwsh
-        working-directory: .
       - uses: actions/checkout@v4
         with:
           path: src-repo
@@ -37,9 +29,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
-      - run: cargo fmt --all && cargo fmt --check
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
+      - run: cargo fmt --all -- --check
       - run: cargo check --all-targets
       - run: cargo test
       - run: cargo clippy --all-targets --all-features -- -D warnings
@@ -48,77 +39,27 @@ jobs:
   artifacts:
     if: github.event_name != 'pull_request'
     needs: check
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: LUNAR-windows-x64.exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: LUNAR-linux-x64
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-      - if: runner.os == 'Windows'
-        run: New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE | Out-Null
-        shell: pwsh
-        working-directory: .
       - uses: actions/checkout@v4
         with:
           path: src-repo
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
-      - run: cargo build --release --target ${{ matrix.target }}
-      - if: runner.os == 'Windows'
-        run: Copy-Item "target/${{ matrix.target }}/release/lunar.exe" "../${{ matrix.archive }}"
-        shell: pwsh
-      - if: runner.os == 'Linux'
-        run: cp "target/${{ matrix.target }}/release/lunar" "../${{ matrix.archive }}"
+      - run: sudo apt-get update && sudo apt-get install -y mingw-w64 libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
+      - run: cargo build --release
+      - run: cargo build --release --target x86_64-pc-windows-gnu
+      - run: cp target/release/lunar ../LUNAR-linux-x64
+      - run: cp target/x86_64-pc-windows-gnu/release/lunar.exe ../LUNAR-windows-x64.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          name: LUNAR-Linux
+          path: LUNAR-linux-x64
           retention-days: 14
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: lunar-windows-x64.exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: lunar-linux-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - if: runner.os == 'Windows'
-        run: New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE | Out-Null
-        shell: pwsh
-        working-directory: .
-      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
         with:
-          path: src-repo
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
-      - run: cargo build --release --target ${{ matrix.target }}
-      - if: runner.os == 'Windows'
-        run: Copy-Item "target/${{ matrix.target }}/release/lunar.exe" "../${{ matrix.archive }}"
-        shell: pwsh
-      - if: runner.os == 'Linux'
-        run: cp "target/${{ matrix.target }}/release/lunar" "../${{ matrix.archive }}"
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.archive }}
+          name: LUNAR-Windows
+          path: LUNAR-windows-x64.exe
+          retention-days: 14
