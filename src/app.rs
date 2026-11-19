@@ -534,7 +534,7 @@ impl LunarApp {
     fn home(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Welcome to LUNAR", "Your Minecraft setup, without the clutter.");
         egui::Frame::new()
-            .fill(Color32::from_rgb(23, 31, 47))
+            .fill(Color32::from_rgba_unmultiplied(23, 31, 47, 158))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(53, 68, 94)))
             .corner_radius(egui::CornerRadius::same(18))
             .inner_margin(egui::Margin::same(28))
