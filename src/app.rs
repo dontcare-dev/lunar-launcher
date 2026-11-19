@@ -1102,12 +1102,14 @@ impl LunarApp {
             egui::ComboBox::from_id_salt("lunar_performance_mode")
                 .selected_text(&self.performance_mode)
                 .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.performance_mode, "Maximum FPS".into(), "Maximum FPS");
                     ui.selectable_value(&mut self.performance_mode, "Performance".into(), "Performance");
                     ui.selectable_value(&mut self.performance_mode, "Balanced".into(), "Balanced");
                     ui.selectable_value(&mut self.performance_mode, "Custom".into(), "Keep my in-game settings");
                 });
             let description = match self.performance_mode.as_str() {
-                "Performance" => "Fast graphics, 6-chunk render distance, 4 simulation distance, minimal particles and no VSync",
+                "Maximum FPS" => "2-chunk render distance, 2 simulation distance, fast graphics and a high FPS ceiling",
+                "Performance" => "4-chunk render distance, reduced effects and no VSync",
                 "Balanced" => "8-chunk render distance with moderate visual settings",
                 _ => "LUNAR will not overwrite your Minecraft video settings",
             };
