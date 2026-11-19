@@ -79,6 +79,7 @@ enum Screen {
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
 type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
+type NavigationItem = (&'static str, Screen, Option<&'static str>, &'static str, &'static [u8]);
 
 pub struct LunarApp {
     profiles: ProfileStore,
@@ -624,7 +625,7 @@ impl LunarApp {
                 });
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                    let navigation: [(&str, Screen, Option<&str>, &'static str, &'static [u8]); 13] = [
+                    let navigation: [NavigationItem; 13] = [
                         ("Home", Screen::Home, None, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, None, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                         ("Versions", Screen::Versions, None, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
