@@ -73,6 +73,8 @@ enum Screen {
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
+type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
+type BackgroundLoadResult = Result<BackgroundFrames, String>;
 
 pub struct LunarApp {
     profiles: ProfileStore,
@@ -118,7 +120,7 @@ pub struct LunarApp {
     background_texture: Option<egui::TextureHandle>,
     background_frame: usize,
     background_next: Instant,
-    background_rx: Option<Receiver<Result<Vec<(egui::ColorImage, u64)>, String>>>,
+    background_rx: Option<Receiver<BackgroundLoadResult>>,
 }
 
 impl LunarApp {
@@ -329,7 +331,7 @@ impl LunarApp {
             painter.image(
                 texture.id(),
                 rect,
-                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0_f32, 1.0_f32)),
                 Color32::WHITE,
             );
         }
@@ -1133,17 +1135,13 @@ impl LunarApp {
             ui.horizontal(|ui| {
                 let field_width = (ui.available_width() - 116.0).max(120.0);
                 ui.add_sized([field_width, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
-                if ui.button("Browse").clicked() {
-                    if let Some(path) = Self::choose_gif_file() {
-                        self.background_gif = path;
-                    }
+                if ui.button("Browse").clicked() && let Some(path) = Self::choose_gif_file() {
+                    self.background_gif = path;
                 }
             });
             ui.horizontal(|ui| {
-                if ui.button("Apply background").clicked() {
-                    if !self.background_gif.trim().is_empty() {
-                        self.load_background_gif(self.background_gif.trim().to_owned());
-                    }
+                if ui.button("Apply background").clicked() && !self.background_gif.trim().is_empty() {
+                    self.load_background_gif(self.background_gif.trim().to_owned());
                 }
                 if ui.button("Remove background").clicked() {
                     self.background_gif.clear();
