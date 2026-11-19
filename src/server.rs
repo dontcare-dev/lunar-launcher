@@ -105,7 +105,7 @@ pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
     } else if let Some((host, port)) = server.address.rsplit_once(':') {
         if !host.contains(':') { (host.to_owned(), port.parse::<u16>()?) } else { (server.address.clone(), 25565) }
     } else { (server.address.clone(), 25565) };
-    let address = format!("{host}:{port}");
+    let address = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
     let socket = address.to_socket_addrs()?.next().context("Server address did not resolve")?;
     let started = Instant::now();
     let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(4)).context("Connection timed out")?;
