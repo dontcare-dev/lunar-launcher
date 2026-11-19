@@ -14,6 +14,10 @@ pub struct Project {
     pub title: String,
     pub description: String,
     pub downloads: u64,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    #[serde(skip)]
+    pub icon_rgba: Option<(usize, usize, Vec<u8>)>,
 }
 
 #[derive(Deserialize)]
@@ -66,7 +70,15 @@ pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
     let response = client()?.get(format!("{API}/search"))
         .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30")])
         .send()?.error_for_status()?.json::<serde_json::Value>()?;
-    Ok(serde_json::from_value(response.get("hits").cloned().unwrap_or_default())?)
+    let mut projects: Vec<Project> = serde_json::from_value(response.get("hits").cloned().unwrap_or_default())?;
+    for project in projects.iter_mut().take(18) {
+        let Some(url) = project.icon_url.as_deref() else { continue };
+        let Ok(bytes) = client()?.get(url).send().and_then(reqwest::blocking::Response::error_for_status).and_then(|response| response.bytes()) else { continue };
+        let Ok(image) = image::load_from_memory(&bytes) else { continue };
+        let image = image.resize(88, 88, image::imageops::FilterType::Triangle).to_rgba8();
+        project.icon_rgba = Some((image.width() as usize, image.height() as usize, image.into_raw()));
+    }
+    Ok(projects)
 }
 
 pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
