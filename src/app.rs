@@ -1057,7 +1057,24 @@ impl LunarApp {
             _ => "Install mods into the selected instance's mods folder.",
         };
         ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
-        if self.content_kind != "modpack" {
+        if self.content_kind == "modpack" {
+            if ui.button("Import local .mrpack").clicked()
+                && let Some(source) = Self::choose_content_file("modpack")
+            {
+                let root = self.game_root.clone();
+                let (tx, rx) = mpsc::channel();
+                self.content_install_rx = Some(rx);
+                self.content_busy = true;
+                self.status = format!("Importing {}…", source.file_name().unwrap_or_default().to_string_lossy());
+                std::thread::spawn(move || {
+                    let result = (|| -> anyhow::Result<String> {
+                        let bytes = fs::read(&source)?;
+                        crate::content::install_modpack_bytes(&bytes, &root)
+                    })().map_err(|error| format!("{error:#}"));
+                    let _ = tx.send(result);
+                });
+            }
+        } else {
             ui.horizontal_wrapped(|ui| {
                 let label = match self.content_kind.as_str() {
                     "mod" => "Import local .jar",
@@ -1800,6 +1817,7 @@ impl LunarApp {
     fn choose_content_file(kind: &str) -> Option<PathBuf> {
         let (filter, description) = match kind {
             "mod" => ("*.jar", "Minecraft mod (*.jar)"),
+            "modpack" => ("*.mrpack", "Modrinth modpack (*.mrpack)"),
             "resourcepack" | "shader" => ("*.zip", "ZIP archive (*.zip)"),
             _ => return None,
         };
