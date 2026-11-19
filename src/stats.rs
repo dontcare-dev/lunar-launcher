@@ -11,6 +11,13 @@ pub struct PlaySession {
     pub instance: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActivePlaySession {
+    pub started_at: u64,
+    pub version: String,
+    pub instance: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayStats {
@@ -19,6 +26,7 @@ pub struct PlayStats {
     pub last_played: Option<u64>,
     pub version_playtime: BTreeMap<String, u64>,
     pub recent_sessions: Vec<PlaySession>,
+    pub active_session: Option<ActivePlaySession>,
 }
 
 impl PlayStats {
@@ -28,8 +36,21 @@ impl PlayStats {
     }
 
     pub fn load() -> Self {
-        Self::path().and_then(|path| fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+        let mut stats = Self::path().and_then(|path| fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        if let Some(active) = stats.active_session.take() {
+            let ended_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let duration = ended_at.saturating_sub(active.started_at).min(12 * 60 * 60);
+            stats.apply_record(active.version, active.instance, active.started_at, duration, ended_at);
+            let _ = stats.save();
+        }
+        stats
+    }
+
+    pub fn begin_session(&mut self, version: String, instance: Option<String>) -> Result<()> {
+        let started_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        self.active_session = Some(ActivePlaySession { started_at, version, instance });
+        self.save()
     }
 
     pub fn save(&self) -> Result<()> {
@@ -53,8 +74,7 @@ impl PlayStats {
         Ok(())
     }
 
-    pub fn record(&mut self, version: String, instance: Option<String>, started_at: u64, duration_seconds: u64) -> Result<()> {
-        let ended_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    fn apply_record(&mut self, version: String, instance: Option<String>, started_at: u64, duration_seconds: u64, ended_at: u64) {
         self.total_launches = self.total_launches.saturating_add(1);
         self.total_playtime_seconds = self.total_playtime_seconds.saturating_add(duration_seconds);
         self.last_played = Some(ended_at);
@@ -62,6 +82,12 @@ impl PlayStats {
         *version_total = version_total.saturating_add(duration_seconds);
         self.recent_sessions.insert(0, PlaySession { started_at, ended_at, duration_seconds, version, instance });
         self.recent_sessions.truncate(100);
+        self.active_session = None;
+    }
+
+    pub fn record(&mut self, version: String, instance: Option<String>, started_at: u64, duration_seconds: u64) -> Result<()> {
+        let ended_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        self.apply_record(version, instance, started_at, duration_seconds, ended_at);
         self.save()
     }
 }
