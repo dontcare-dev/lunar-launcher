@@ -166,7 +166,7 @@ fn directory_size(path: &Path) -> Result<u64> {
 }
 
 fn safe_world_name(name: &str) -> Result<()> {
-    if name.trim().is_empty() || name == "." || name == ".." || name.contains(['/', '\\\\', ':']) || name.chars().any(char::is_control) {
+    if name.trim().is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\\\') || name.contains(':') || name.chars().any(char::is_control) {
         bail!("World names cannot be empty or contain path separators");
     }
     Ok(())
