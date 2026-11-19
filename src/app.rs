@@ -1012,7 +1012,7 @@ impl LunarApp {
         });
         ui.add_space(10.0);
         if previous_memory != self.memory_mb {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone() }.save();
         }
         ui.group(|ui| {
             ui.horizontal(|ui| {
