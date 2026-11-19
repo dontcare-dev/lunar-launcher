@@ -66,7 +66,7 @@ fn safe_relative(value: &str) -> Result<PathBuf> {
 }
 
 pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
-    if !matches!(kind, "modpack" | "resourcepack" | "mod") { bail!("Unsupported Modrinth project type"); }
+    if !matches!(kind, "modpack" | "resourcepack" | "mod" | "shader") { bail!("Unsupported Modrinth project type"); }
     let facets = format!("[[\"project_type:{kind}\"]]");
     let response = client()?.get(format!("{API}/search"))
         .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30")])
@@ -95,6 +95,24 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
         bail!("Resource-pack checksum verification failed");
     }
     let directory = root.join("resourcepacks");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(&file.filename);
+    fs::write(&destination, bytes)?;
+    Ok(destination.display().to_string())
+}
+
+pub fn install_shader_pack(project_id: &str, root: &Path) -> Result<String> {
+    let http = client()?;
+    let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
+    let version = versions.first().context("No downloadable shader-pack version was found")?;
+    let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The shader-pack version contains no files")?;
+    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
+    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
+        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+    {
+        bail!("Shader-pack checksum verification failed");
+    }
+    let directory = root.join("shaderpacks");
     fs::create_dir_all(&directory)?;
     let destination = directory.join(&file.filename);
     fs::write(&destination, bytes)?;

@@ -135,6 +135,9 @@ pub struct LunarApp {
     workspace_results: Vec<String>,
     workspace_section: String,
     workspace_preview: Option<String>,
+    download_manager: crate::downloads::DownloadManager,
+    download_url: String,
+    download_folder: String,
 }
 
 impl LunarApp {
@@ -218,6 +221,9 @@ impl LunarApp {
             workspace_results: Vec::new(),
             workspace_section: "Overview".into(),
             workspace_preview: None,
+            download_manager: crate::downloads::DownloadManager::default(),
+            download_url: String::new(),
+            download_folder: "downloads".into(),
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -906,6 +912,7 @@ impl LunarApp {
             ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
             ui.selectable_value(&mut self.content_kind, "resourcepack".into(), "Resource packs");
             ui.selectable_value(&mut self.content_kind, "mod".into(), "Mods");
+            ui.selectable_value(&mut self.content_kind, "shader".into(), "Shaders");
         });
         if self.content_kind == "mod" {
             egui::ComboBox::from_id_salt("content_loader").selected_text(&self.content_loader).show_ui(ui, |ui| {
@@ -959,6 +966,7 @@ impl LunarApp {
         let description = match self.content_kind.as_str() {
             "modpack" => "Modpacks install into separate instances with their mods and configurations.",
             "resourcepack" => "Resource packs install directly into Minecraft's resource-pack library.",
+            "shader" => "Browse and install shader packs into Minecraft's shaderpacks folder.",
             _ => "Install mods into your Minecraft mods folder.",
         };
         ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
@@ -996,6 +1004,7 @@ impl LunarApp {
                                 std::thread::spawn(move || {
                                     let result = match kind.as_str() {
                                         "resourcepack" => crate::content::install_resource_pack(&id, &root),
+                                        "shader" => crate::content::install_shader_pack(&id, &root),
                                         "mod" => crate::content::install_mod(&id, &root, &minecraft, &loader),
                                         _ => crate::content::install_modpack(&id, &root),
                                     }.map_err(|error| format!("{error:#}"));
@@ -1249,7 +1258,7 @@ impl LunarApp {
                         match launcher::load_installed(&item.minecraft, &self.game_root) {
                             Ok(mut installed) => {
                                 installed.game_directory = Some(path.clone());
-                                match launcher::launch(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode) {
+                                match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode, item.java_major) {
                                     Ok(process) => { self.game_process = Some(process); if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); } self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Launching {}", item.name); }
                                     Err(error) => self.status = format!("{error:#}"),
                                 }
@@ -1353,13 +1362,49 @@ impl LunarApp {
                 ui.label("Use the instance memory control on Overview to adjust its allocation. Actual FPS depends on Minecraft settings, mods and GPU capability.");
             }
             "Downloads" => {
-                ui.label(RichText::new("DOWNLOAD ACTIVITY").strong());
-                ui.label(&self.status);
+                ui.label(RichText::new("DOWNLOAD QUEUE").strong());
+                ui.label("Queue direct file links and pause, resume or cancel transfers. Downloads are streamed to a temporary file and moved into place when complete.");
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("https://example.com/file.jar"));
+                    egui::ComboBox::from_id_salt("download_destination").selected_text(&self.download_folder).show_ui(ui, |ui| {
+                        for folder in ["downloads", "mods", "resourcepacks", "shaderpacks", "screenshots"] { ui.selectable_value(&mut self.download_folder, folder.to_owned(), folder); }
+                    });
+                    if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Add to queue")).clicked() {
+                        let base = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref())
+                            .map(|entry| crate::workspace::instance_path(&self.game_root, entry)).unwrap_or_else(|| self.game_root.clone());
+                        match self.download_manager.enqueue(self.download_url.trim(), base.join(&self.download_folder)) {
+                            Ok(_) => { self.download_url.clear(); self.status = "Download queued".into(); }
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                });
+                if ui.button("Clear completed").clicked() { self.download_manager.clear_finished(); }
+                for task in self.download_manager.tasks().to_vec() {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&task.filename).strong());
+                                ui.label(RichText::new(task.state.label()).size(10.0).color(Color32::GRAY));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if task.state == crate::downloads::DownloadState::Paused {
+                                    if ui.small_button("Resume").clicked() { self.download_manager.resume(task.id); }
+                                } else if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_)) {
+                                    if ui.small_button("Pause").clicked() { self.download_manager.pause(task.id); }
+                                }
+                                if !matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Cancelled | crate::downloads::DownloadState::Failed(_))
+                                    && ui.small_button("Cancel").clicked() { self.download_manager.cancel(task.id); }
+                            });
+                        });
+                        if let Some(total) = task.total.filter(|total| *total > 0) {
+                            ui.add(egui::ProgressBar::new((task.downloaded as f32 / total as f32).clamp(0.0, 1.0)).text(format!("{} / {} MB", task.downloaded / 1_048_576, total / 1_048_576)));
+                        } else if task.state == crate::downloads::DownloadState::Downloading { ui.spinner(); }
+                    });
+                }
                 if let Some(progress) = &self.install_progress {
                     let fraction = if progress.total == 0 { 0.0 } else { progress.completed as f32 / progress.total as f32 };
-                    ui.add(egui::ProgressBar::new(fraction).text(format!("{} · {}/{}", progress.phase, progress.completed, progress.total)));
-                } else { ui.label("No Minecraft installation progress is currently reported."); }
-                ui.label("Active Modrinth installs and Java downloads report their current task in the status bar. Pause/resume controls are not available for those transfers yet.");
+                    ui.add(egui::ProgressBar::new(fraction).text(format!("Minecraft: {} · {}/{}", progress.phase, progress.completed, progress.total)));
+                }
             }
             "Search" => {
                 for result in self.workspace_results.clone() { ui.label(result); }
@@ -1539,6 +1584,7 @@ impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
+        self.download_manager.poll();
         self.poll_background(ctx);
         if let Some(rx) = &self.content_search_rx
             && let Ok(result) = rx.try_recv()
@@ -1624,6 +1670,7 @@ impl eframe::App for LunarApp {
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
+            || self.download_manager.has_active()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }

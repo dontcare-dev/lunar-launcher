@@ -146,7 +146,7 @@ pub fn backup_world(instance: &Path, world: &str) -> Result<PathBuf> {
     let output = output_dir.join(format!("{}-{}.zip", slug(world), now()));
     let file = fs::File::create(&output)?;
     let mut writer = ZipWriter::new(file);
-    add_directory(&mut writer, &source, &source)?;
+    add_directory(&mut writer, source.parent().unwrap_or(&source), &source)?;
     writer.finish()?;
     Ok(output)
 }
@@ -159,7 +159,7 @@ pub fn restore_world(archive_path: &Path, instance: &Path) -> Result<String> {
     fs::create_dir_all(&saves)?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else { bail!("Backup contains an unsafe path"); };
+        let Some(relative) = entry.enclosed_name() else { bail!("Backup contains an unsafe path"); };
         if relative.as_os_str().is_empty() { continue; }
         let destination = saves.join(&relative);
         if entry.is_dir() { fs::create_dir_all(destination)?; }
@@ -251,7 +251,7 @@ pub fn search(root: &Path, query: &str) -> Result<Vec<String>> {
 pub fn read_tail(path: &Path, max_lines: usize) -> Result<String> {
     let text = fs::read_to_string(path)?;
     let lines = text.lines().collect::<Vec<_>>();
-    Ok(lines.iter().rev().take(max_lines).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+    Ok(lines.iter().rev().take(max_lines).map(|line| *line).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 
 pub fn system_memory_mb() -> Option<(u64, u64)> {
