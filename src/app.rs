@@ -777,7 +777,7 @@ impl LunarApp {
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
             if previous_snapshots != self.snapshots {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
             }
         });
         if let Some(manifest) = &self.manifest {
@@ -1176,7 +1176,7 @@ impl LunarApp {
         });
         ui.add_space(10.0);
         if previous_memory != self.memory_mb {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
         }
         ui.add_space(10.0);
         if ui.checkbox(&mut self.animations_enabled, "Enable animated interface and ambient effects").changed() {
@@ -1200,11 +1200,11 @@ impl LunarApp {
             };
             ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
             if ui.checkbox(&mut self.auto_sodium, "Automatically install Fabric + Sodium for vanilla launches").changed() {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
             }
         });
         if previous_performance != self.performance_mode {
-            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+            LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
         }
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -1239,7 +1239,7 @@ impl LunarApp {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
                 Self::svg_icon(ui, "bytes://lunar-image.svg", include_bytes!("../assets/icons/image.svg"), 20.0);
-                ui.label(RichText::new("AMBIENT BACKGROUND").strong());
+                ui.label(RichText::new("ADD BACKGROUND GIF").strong());
             });
             ui.label(RichText::new("Choose any local GIF. Its frame timing is preserved so the background animation stays in sync, behind the transparent panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
             ui.add_space(8.0);
@@ -1266,7 +1266,7 @@ impl LunarApp {
                     self.background_frames.clear();
                     self.background_texture = None;
                     self.background_rx = None;
-                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium, animations_enabled: self.animations_enabled }.save();
                     self.status = "Animated background removed".into();
                 }
             });
