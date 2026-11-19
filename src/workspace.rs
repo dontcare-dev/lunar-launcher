@@ -13,6 +13,8 @@ pub struct Instance {
     pub created_at: u64,
     pub last_played: Option<u64>,
     pub play_count: u64,
+    #[serde(default)]
+    pub loader: Option<String>,
 }
 
 fn now() -> u64 {
@@ -62,7 +64,7 @@ pub fn create_instance(root: &Path, name: &str, minecraft: &str) -> Result<Insta
     while root.join("instances").join(&id).exists() { id = format!("{base}-{suffix}"); suffix += 1; }
     let path = root.join("instances").join(&id);
     for folder in ["mods", "resourcepacks", "shaderpacks", "screenshots", "saves", "logs", "crash-reports", "config"] { fs::create_dir_all(path.join(folder))?; }
-    let item = Instance { id, name: clean.to_owned(), minecraft: minecraft.to_owned(), memory_mb: 4096, java_major: None, created_at: now(), last_played: None, play_count: 0 };
+    let item = Instance { id, name: clean.to_owned(), minecraft: minecraft.to_owned(), memory_mb: 4096, java_major: None, created_at: now(), last_played: None, play_count: 0, loader: None };
     save_instance(root, &item)?;
     Ok(item)
 }
@@ -362,7 +364,7 @@ mod tests {
     #[test]
     fn instance_manifest_round_trips() {
         let root = std::env::temp_dir().join(format!("lunar-workspace-{}", std::process::id()));
-        let item = Instance { id: "test-instance".into(), name: "Test Instance".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0 };
+        let item = Instance { id: "test-instance".into(), name: "Test Instance".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: None };
         save_instance(&root, &item).unwrap();
         assert_eq!(list_instances(&root).unwrap()[0].name, item.name);
         let _ = fs::remove_dir_all(root);
