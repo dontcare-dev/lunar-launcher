@@ -43,7 +43,15 @@ fn download_libraries(profile: &Value, root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn merge(mut base: InstalledVersion, profile: &Value, instance: &Path, root: &Path) -> Result<InstalledVersion> {
-    for library in download_libraries(profile, root)? { if !base.libraries.contains(&library) { base.libraries.push(library); } }
+    for library in download_libraries(profile, root)? {
+        if !base.libraries.contains(&library) { base.libraries.push(library); }
+    }
+    if let Some(items) = profile.get("libraries").and_then(Value::as_array) {
+        let target = base.metadata["libraries"].as_array_mut().context("Minecraft profile has no library list")?;
+        for item in items {
+            if !target.contains(item) { target.push(item.clone()); }
+        }
+    }
     if let Some(main) = profile.get("mainClass").and_then(Value::as_str) { base.main_class = main.to_owned(); base.metadata["mainClass"] = json!(main); }
     if !base.metadata["arguments"].is_object() { base.metadata["arguments"] = json!({}); }
     if let Some(args) = profile.get("arguments").and_then(Value::as_object) {
