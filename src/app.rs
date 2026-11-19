@@ -772,7 +772,8 @@ impl LunarApp {
             });
         }
         ui.horizontal(|ui| {
-            ui.add_sized([360.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
+            Self::svg_icon(ui, "bytes://lunar-search.svg", include_bytes!("../assets/icons/search.svg"), 18.0);
+            ui.add_sized([336.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
             if ui.add_enabled(!self.content_busy, egui::Button::new("Search")).clicked() {
                 let query = self.content_query.clone();
                 let kind = self.content_kind.clone();
@@ -799,7 +800,11 @@ impl LunarApp {
                             ui.label(RichText::new(&project.description).size(11.0).color(Color32::GRAY));
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add_enabled(!self.content_busy, egui::Button::new("Install")).clicked() {
+                            let install_icon = egui::Image::from_bytes(
+                                "bytes://lunar-download.svg",
+                                include_bytes!("../assets/icons/download.svg").as_slice(),
+                            ).fit_to_exact_size(Vec2::splat(16.0));
+                            if ui.add_enabled(!self.content_busy, egui::Button::image_and_text(install_icon, "Install")).clicked() {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
                                 let kind = self.content_kind.clone();
