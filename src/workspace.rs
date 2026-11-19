@@ -145,7 +145,7 @@ pub fn list_worlds(instance: &Path) -> Result<Vec<(String, u64, u64)>> {
     let mut worlds = Vec::new();
     for entry in fs::read_dir(saves)? {
         let entry = entry?;
-        if !entry.file_type()?.is_dir() { continue; }
+        if !entry.file_type()?.is_dir() || !entry.path().join("level.dat").is_file() { continue; }
         let metadata = entry.metadata()?;
         let modified = metadata.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map(|duration| duration.as_secs()).unwrap_or(0);
         let size = directory_size(&entry.path()).unwrap_or(0);
