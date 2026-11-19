@@ -224,9 +224,13 @@ impl LunarApp {
         self.status = "Loading animated background…".into();
         std::thread::spawn(move || {
             let result = (|| -> Result<Vec<(egui::ColorImage, u64)>, String> {
+                let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+                if metadata.len() > 50 * 1024 * 1024 {
+                    return Err("GIF files must be 50 MB or smaller".into());
+                }
                 let file = fs::File::open(&path).map_err(|error| error.to_string())?;
                 let decoder = GifDecoder::new(BufReader::new(file)).map_err(|error| error.to_string())?;
-                let decoded = decoder.into_frames().take(180).collect_frames().map_err(|error| error.to_string())?;
+                let decoded = decoder.into_frames().take(48).collect_frames().map_err(|error| error.to_string())?;
                 if decoded.is_empty() {
                     return Err("The selected GIF contains no frames".into());
                 }
@@ -236,7 +240,7 @@ impl LunarApp {
                     let delay_ms = (delay.0 / delay.1.max(1)).clamp(60, 1200) as u64;
                     let mut image = frame.into_buffer();
                     let (width, height) = image.dimensions();
-                    let scale = (1600.0_f32 / width as f32).min(1000.0_f32 / height as f32).min(1.0);
+                    let scale = (960.0_f32 / width as f32).min(540.0_f32 / height as f32).min(1.0);
                     if scale < 1.0 {
                         image = image::imageops::resize(
                             &image,
@@ -1043,7 +1047,8 @@ impl LunarApp {
             ui.label(RichText::new("Use a local GIF as the full-window animated backdrop. LUNAR softens and darkens it behind the glass panels.").size(12.0).color(Color32::from_rgb(166, 176, 197)));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.add_sized([ui.available_width() - 116.0, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
+                let field_width = (ui.available_width() - 116.0).max(120.0);
+                ui.add_sized([field_width, 34.0], egui::TextEdit::singleline(&mut self.background_gif).hint_text("Path to a .gif file"));
                 if ui.button("Browse").clicked() {
                     if let Some(path) = Self::choose_gif_file() {
                         self.background_gif = path;
