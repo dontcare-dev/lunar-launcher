@@ -14,7 +14,7 @@ pub fn analyze(log: &str) -> String {
         ("could not reserve enough space", "Error", "Java could not reserve the requested memory. Reduce the allocated RAM and close other applications."),
         ("glfw error", "Warning", "The graphics/windowing layer reported an error. Update the graphics driver and check display compatibility."),
         ("opengl error", "Warning", "The graphics driver reported an OpenGL problem. Update the graphics driver and disable shaders for testing."),
-        ("exit code -1073741819", "Warning", "Windows reported an application access violation. Check graphics drivers, overlays and recently added mods."),
+        ("1073741819", "Warning", "Windows reported an application access violation. Check graphics drivers, overlays and recently added mods."),
     ];
     let mut findings = Vec::new();
     for (needle, severity, detail) in patterns {
