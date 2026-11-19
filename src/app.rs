@@ -1,3 +1,4 @@
+use anyhow::Context;
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
