@@ -123,6 +123,7 @@ pub struct LunarApp {
     content_loader: String,
     installed_packs: Vec<crate::content::InstalledPack>,
     modpack_launch_rx: Option<Receiver<Result<InstalledVersion, String>>>,
+    pending_instance_launch: Option<crate::workspace::Instance>,
     servers: Vec<crate::server::SavedServer>,
     server_name: String,
     server_address: String,
@@ -221,6 +222,7 @@ impl LunarApp {
             content_loader: "fabric".into(),
             installed_packs: crate::content::installed_modpacks(&game_root).unwrap_or_default(),
             modpack_launch_rx: None,
+            pending_instance_launch: None,
             servers: crate::server::load(),
             server_name: String::new(),
             server_address: String::new(),
@@ -1506,6 +1508,7 @@ impl LunarApp {
                             let loader = item.loader.clone();
                             let instance_path = path.clone();
                             let (tx, rx) = mpsc::channel();
+                            self.pending_instance_launch = Some(item.clone());
                             self.modpack_launch_rx = Some(rx);
                             self.status = format!("Preparing {} with {}…", item.name, loader.as_deref().unwrap_or("loader"));
                             std::thread::spawn(move || {
@@ -2253,23 +2256,42 @@ impl eframe::App for LunarApp {
         {
             self.modpack_launch_rx = None;
             match result {
-                Ok(installed) => {
+                Ok(mut installed) => {
                     if let Some(profile) = self.profiles.profiles.iter().find(|profile| {
                         Some(profile.name.as_str()) == self.profiles.selected.as_deref()
                     }) {
-                        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
-                            Ok(process) => {
-                                self.game_process = Some(process);
-                                self.begin_play_session(installed.id.clone(), None);
-                                self.status = format!("Launching {}", installed.id);
+                        if let Some(mut instance) = self.pending_instance_launch.take() {
+                            let instance_path = crate::workspace::instance_path(&self.game_root, &instance);
+                            installed.game_directory = Some(instance_path);
+                            match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, instance.memory_mb, &self.performance_mode, instance.java_major) {
+                                Ok(process) => {
+                                    self.game_process = Some(process);
+                                    self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
+                                    if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut instance) { self.status = error.to_string(); }
+                                    self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                                    self.status = format!("Launching {}", instance.name);
+                                }
+                                Err(error) => self.status = format!("{error:#}"),
                             }
-                            Err(error) => self.status = format!("{error:#}"),
+                        } else {
+                            match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
+                                Ok(process) => {
+                                    self.game_process = Some(process);
+                                    self.begin_play_session(installed.id.clone(), None);
+                                    self.status = format!("Launching {}", installed.id);
+                                }
+                                Err(error) => self.status = format!("{error:#}"),
+                            }
                         }
                     } else {
+                        self.pending_instance_launch = None;
                         self.status = "Select an offline profile first".into();
                     }
                 }
-                Err(error) => self.status = error,
+                Err(error) => {
+                    self.pending_instance_launch = None;
+                    self.status = error;
+                }
             }
         }
         if let Some(rx) = &self.server_rx
