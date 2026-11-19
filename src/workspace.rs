@@ -217,6 +217,21 @@ pub fn delete_world(instance: &Path, world: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn export_world(instance: &Path, world: &str, destination: &Path) -> Result<()> {
+    safe_world_name(world)?;
+    let source = instance.join("saves").join(world);
+    if !source.is_dir() || !source.join("level.dat").is_file() { bail!("Selected folder is not a Minecraft world"); }
+    if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
+    let temporary = destination.with_extension("zip.lunar-tmp");
+    let file = fs::File::create(&temporary)?;
+    let mut writer = ZipWriter::new(file);
+    add_directory(&mut writer, source.parent().context("World folder has no parent")?, &source)?;
+    writer.finish()?;
+    if destination.exists() { fs::remove_file(destination)?; }
+    fs::rename(temporary, destination)?;
+    Ok(())
+}
+
 pub fn backup_world(instance: &Path, world: &str) -> Result<PathBuf> {
     if world.is_empty() || world.contains(['/', '\\']) || world == "." || world == ".." { bail!("Invalid world name"); }
     let source = instance.join("saves").join(world);
