@@ -1,19 +1,21 @@
-# LUNAR
+# Lunar Launcher
 
-LUNAR is a native Rust Minecraft Java Edition launcher built around local offline profiles and a focused desktop interface.
+Lunar Launcher is a native Rust desktop launcher for Minecraft Java Edition, built around local offline profiles and a fast, animated interface.
 
 ## Features
 
-- Native desktop UI with Home, Play, Versions, Profiles and Settings screens
-- Offline profile creation, selection, renaming, deletion and persistent storage
-- Mojang's official version manifest with release and snapshot selection
-- Downloads version metadata, the client JAR, libraries, native libraries and asset indexes
+- Native Windows desktop application with an animated moon splash screen
+- Translucent interface, ambient particle effects and interactive project artwork
+- Optional animated GIF backgrounds with synchronized frame timing
+- Animation toggle for users who prefer a lighter interface
+- Offline profile creation, selection, renaming and deletion
+- Mojang's official Minecraft version manifest and installation flow
+- Java detection and managed Java runtime installation
+- Memory allocation and Minecraft performance presets
+- Automatic Fabric + Sodium setup for vanilla launches
+- Modrinth modpack, mod and resource-pack discovery and installation
+- Saved servers and server status checks
 - SHA-1 verification for downloaded game files
-- Parallel asset downloads with progress reporting
-- Native library extraction with path traversal protection
-- Java detection, memory allocation and process launching
-- Captured game output written to the launcher game log
-- Local game data stored in the operating system's application-data directory
 
 Offline profiles are local identities only. They do not authenticate with Mojang or Microsoft, bypass game ownership, or grant access to online-mode servers. Use a legitimate Minecraft installation and only servers that permit offline-mode connections.
 
@@ -30,16 +32,14 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release
 ```
 
+## Windows build
+
+The GitHub Actions workflow produces a Windows x64 executable and a Linux x64 build. Open the repository's Actions tab, select the latest successful CI run, and download the `Lunar-Launcher-Windows-x64` artifact.
+
 ## Game data
 
-LUNAR stores game versions, libraries, assets and logs inside its application-data directory under `minecraft`. The Play screen installs the selected official version before enabling launch. A compatible Java runtime must be installed and available on `PATH`.
-
-Game output is appended to `minecraft/logs/lunar-game.log`.
-
-## Current scope
-
-The launcher currently targets vanilla Minecraft Java Edition. Fabric, Forge, NeoForge, modpack import, automatic Java runtime provisioning, Microsoft authentication, and server browsing are not included.
+Lunar Launcher stores game versions, libraries, assets and logs inside its application-data directory. Game output is appended to `minecraft/logs/lunar-game.log`.
 
 ## Disclaimer
 
-Minecraft is a trademark of Mojang Studios. LUNAR is an independent project and is not affiliated with or endorsed by Mojang or Microsoft.
+Minecraft is a trademark of Mojang Studios. Lunar Launcher is an independent project and is not affiliated with or endorsed by Mojang or Microsoft.
