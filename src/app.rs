@@ -1398,7 +1398,7 @@ impl LunarApp {
             let painter = ui.painter_at(rect);
             for step in 0..=4 {
                 let y = rect.top() + rect.height() * step as f32 / 4.0;
-                painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(160, 175, 205, 28)));
+                painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(160, 175, 205, 28)));
             }
             if history.len() > 1 {
                 let points: Vec<_> = history.iter().enumerate().map(|(index, value)| {
