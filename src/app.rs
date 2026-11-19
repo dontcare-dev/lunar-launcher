@@ -10,11 +10,12 @@ struct LauncherPreferences {
     snapshots: bool,
     background_gif: String,
     performance_mode: String,
+    auto_sodium: bool,
 }
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into() }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true }
     }
 }
 
@@ -98,6 +99,7 @@ pub struct LunarApp {
     java_status: String,
     memory_mb: u32,
     performance_mode: String,
+    auto_sodium: bool,
     game_process: Option<Child>,
     content_kind: String,
     content_query: String,
@@ -170,6 +172,7 @@ impl LunarApp {
             java_status,
             memory_mb: preferences.memory_mb.clamp(2048, 8192),
             performance_mode: preferences.performance_mode.clone(),
+            auto_sodium: preferences.auto_sodium,
             game_process: None,
             content_kind: "modpack".into(),
             content_query: String::new(),
@@ -462,6 +465,23 @@ impl LunarApp {
                 }
             },
         };
+        if self.auto_sodium && installed.game_directory.is_none() {
+            let minecraft = self.selected_version.clone();
+            let root = self.game_root.clone();
+            let instance = root.join("instances").join(format!("sodium-{minecraft}"));
+            let (tx, rx) = mpsc::channel();
+            self.modpack_launch_rx = Some(rx);
+            self.status = format!("Preparing Fabric + Sodium for Minecraft {minecraft}…");
+            std::thread::spawn(move || {
+                let result = (|| -> anyhow::Result<InstalledVersion> {
+                    let installed = crate::loaders::install_fabric_profile(&minecraft, &root, &instance)?;
+                    crate::content::install_mod("AANobbMI", &instance, &minecraft, "fabric")?;
+                    Ok(installed)
+                })().map_err(|error| format!("{error:#}"));
+                let _ = tx.send(result);
+            });
+            return;
+        }
         match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
             Ok(process) => {
                 self.installed_version = Some(installed);
@@ -674,7 +694,7 @@ impl LunarApp {
             let previous_snapshots = self.snapshots;
             ui.checkbox(&mut self.snapshots, "Include snapshots");
             if previous_snapshots != self.snapshots {
-                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
             }
         });
         if let Some(manifest) = &self.manifest {
@@ -1091,6 +1111,9 @@ impl LunarApp {
                 _ => "LUNAR will not overwrite your Minecraft video settings",
             };
             ui.label(RichText::new(description).size(11.0).color(Color32::GRAY));
+            if ui.checkbox(&mut self.auto_sodium, "Automatically install Fabric + Sodium for vanilla launches").changed() {
+                LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
+            }
         });
         if previous_performance != self.performance_mode {
             LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: self.background_gif.clone(), performance_mode: self.performance_mode.clone() }.save();
@@ -1148,7 +1171,7 @@ impl LunarApp {
                     self.background_frames.clear();
                     self.background_texture = None;
                     self.background_rx = None;
-                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone() }.save();
+                    LauncherPreferences { memory_mb: self.memory_mb, snapshots: self.snapshots, background_gif: String::new(), performance_mode: self.performance_mode.clone(), auto_sodium: self.auto_sodium }.save();
                     self.status = "Animated background removed".into();
                 }
             });
