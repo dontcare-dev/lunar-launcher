@@ -75,6 +75,7 @@ enum Screen {
     Content,
     Servers,
     Workspace,
+    LivePerformance,
     PlayStats,
 }
 
@@ -155,6 +156,8 @@ pub struct LunarApp {
     download_folder: String,
     system_monitor: sysinfo::System,
     last_metrics_refresh: Instant,
+    cpu_history: Vec<f32>,
+    memory_history: Vec<f32>,
 }
 
 impl LunarApp {
@@ -254,6 +257,8 @@ impl LunarApp {
             download_folder: "downloads".into(),
             system_monitor: sysinfo::System::new_all(),
             last_metrics_refresh: Instant::now(),
+            cpu_history: Vec::with_capacity(120),
+            memory_history: Vec::with_capacity(120),
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -698,11 +703,10 @@ impl LunarApp {
                         ("Versions", Screen::Versions, None, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
                         ("Profiles", Screen::Profiles, None, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                         ("Content", Screen::Content, None, "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
-                        ("Instance Manager", Screen::Workspace, Some("Overview"), "bytes://lunar-content.svg", include_bytes!("../assets/icons/content.svg")),
+                        ("Live Performance Manager", Screen::LivePerformance, None, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
                         ("Mod Manager", Screen::Content, None, "bytes://lunar-mods.svg", include_bytes!("../assets/icons/mods.svg")),
                         ("Resource Packs", Screen::Content, None, "bytes://lunar-packs.svg", include_bytes!("../assets/icons/resource-packs.svg")),
                         ("Shader Manager", Screen::Content, None, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
-                        ("Performance Center", Screen::Workspace, Some("Performance"), "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
                         ("Launcher Customization", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, None, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                         ("Settings", Screen::Settings, None, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
@@ -1418,6 +1422,128 @@ impl LunarApp {
             });
         }
         if self.server_rx.is_some() { ui.spinner(); }
+    }
+
+    fn live_performance_manager(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Live Performance Manager", "Real-time system and Minecraft telemetry, with launcher-side performance controls.");
+
+        let cpu = self.system_monitor.global_cpu_usage().clamp(0.0, 100.0);
+        let total_memory = self.system_monitor.total_memory() / 1024 / 1024;
+        let used_memory = self.system_monitor.used_memory() / 1024 / 1024;
+        let memory_percent = if total_memory > 0 { used_memory as f32 / total_memory as f32 * 100.0 } else { 0.0 };
+        let game_metrics = self.game_process.as_ref().and_then(|process| {
+            self.system_monitor.process(sysinfo::Pid::from_u32(process.id())).map(|game| (
+                game.cpu_usage(),
+                game.memory() / 1024 / 1024,
+                process.id(),
+            ))
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            for (label, value, detail) in [
+                ("SYSTEM CPU", format!("{cpu:.0}%"), format!("{} logical threads", self.system_monitor.cpus().len())),
+                ("SYSTEM MEMORY", format!("{memory_percent:.0}%"), format!("{used_memory} / {total_memory} MB")),
+                ("JAVA PROCESS", game_metrics.as_ref().map(|m| format!("{:.1}% CPU", m.0)).unwrap_or_else(|| "Not running".into()), game_metrics.as_ref().map(|m| format!("{} MB RAM", m.1)).unwrap_or_else(|| "Launch Minecraft to monitor".into())),
+            ] {
+                egui::Frame::group(ui.style())
+                    .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 190))
+                    .corner_radius(egui::CornerRadius::same(13))
+                    .inner_margin(egui::Margin::same(16))
+                    .show(ui, |ui| {
+                        ui.set_min_width(170.0);
+                        ui.label(RichText::new(label).size(10.0).strong().color(self.accent));
+                        ui.label(RichText::new(value).size(25.0).strong());
+                        ui.label(RichText::new(detail).size(11.0).color(Color32::GRAY));
+                    });
+            }
+        });
+
+        ui.add_space(16.0);
+        ui.columns(2, |columns| {
+            for (column, title, history) in [
+                (&mut columns[0], "CPU LOAD · LAST 2 MINUTES", &self.cpu_history),
+                (&mut columns[1], "RAM USAGE · LAST 2 MINUTES", &self.memory_history),
+            ] {
+                column.group(|ui| {
+                    ui.label(RichText::new(title).size(10.0).strong().color(self.accent));
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 112.0), egui::Sense::hover());
+                    let painter = ui.painter_at(rect);
+                    for step in 0..=4 {
+                        let y = rect.top() + rect.height() * step as f32 / 4.0;
+                        painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], Stroke::new(1.0, Color32::from_rgba_unmultiplied(160, 175, 205, 28)));
+                    }
+                    if history.len() > 1 {
+                        let points: Vec<_> = history.iter().enumerate().map(|(index, value)| {
+                            let x = rect.left() + rect.width() * index as f32 / (history.len() - 1) as f32;
+                            let y = rect.bottom() - rect.height() * value.clamp(0.0, 100.0) / 100.0;
+                            egui::pos2(x, y)
+                        }).collect();
+                        painter.add(egui::Shape::line(points, Stroke::new(2.2, self.accent)));
+                    }
+                    ui.label(RichText::new("0%").size(9.0).color(Color32::GRAY));
+                });
+            }
+        });
+
+        ui.add_space(12.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("MINECRAFT PROCESS").strong().color(self.accent));
+            if let Some((game_cpu, game_memory, pid)) = game_metrics {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("CPU: {game_cpu:.1}%"));
+                    ui.label(format!("Memory: {game_memory} MB"));
+                    ui.label(format!("Process ID: {pid}"));
+                });
+                ui.add(egui::ProgressBar::new((game_cpu / 100.0).clamp(0.0, 1.0)).text("Process CPU"));
+            } else {
+                ui.label("Minecraft is not currently running. Launch a game to see its live CPU and memory usage.");
+            }
+        });
+
+        ui.add_space(12.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("LAUNCH PERFORMANCE PROFILE").strong().color(self.accent));
+            ui.horizontal_wrapped(|ui| {
+                egui::ComboBox::from_id_salt("live_performance_profile")
+                    .selected_text(&self.performance_mode)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.performance_mode, "Maximum FPS".into(), "Maximum FPS");
+                        ui.selectable_value(&mut self.performance_mode, "Performance".into(), "Performance");
+                        ui.selectable_value(&mut self.performance_mode, "Balanced".into(), "Balanced");
+                        ui.selectable_value(&mut self.performance_mode, "Custom".into(), "Custom");
+                    });
+                if ui.button("Apply recommended profile").clicked() {
+                    self.performance_mode = "Performance".into();
+                    self.memory_mb = self.memory_mb.clamp(2048, 8192);
+                    self.status = "Performance launch profile selected".into();
+                }
+            });
+            ui.label("These settings are applied when the next Minecraft session launches; they do not change settings inside an active game.");
+            ui.label(RichText::new(format!("Default Java memory allocation: {} MB", self.memory_mb)).size(11.0).color(Color32::GRAY));
+            if ui.add(egui::Slider::new(&mut self.memory_mb, 2048..=8192).step_by(512.0).suffix(" MB")).changed() {
+                self.status = format!("Default launch memory set to {} MB", self.memory_mb);
+            }
+            if ui.button("Save performance settings").clicked() {
+                LauncherPreferences {
+                    memory_mb: self.memory_mb,
+                    snapshots: self.snapshots,
+                    background_gif: self.background_gif.clone(),
+                    performance_mode: self.performance_mode.clone(),
+                    auto_sodium: self.auto_sodium,
+                    animations_enabled: self.animations_enabled,
+                    accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()],
+                }.save();
+                self.status = "Performance settings saved".into();
+            }
+        });
+
+        ui.add_space(12.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("TELEMETRY LIMITS").strong().color(self.accent));
+            ui.label("System CPU and RAM plus the launched Minecraft process are measured locally. In-game FPS, server ping, GPU load and frame-time require game-side or hardware-specific telemetry and are not fabricated here.");
+            ui.label(RichText::new("Metrics refresh once per second · 120-point history · local only").size(10.0).color(Color32::GRAY));
+        });
+        ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
 
     fn workspace(&mut self, ui: &mut egui::Ui) {
@@ -2224,6 +2350,13 @@ impl eframe::App for LunarApp {
         self.poll_launcher(ctx);
         if self.last_metrics_refresh.elapsed() >= Duration::from_secs(1) {
             self.system_monitor.refresh_all();
+            let cpu = self.system_monitor.global_cpu_usage().clamp(0.0, 100.0);
+            let total = self.system_monitor.total_memory().max(1) as f32;
+            let memory = (self.system_monitor.used_memory() as f32 / total * 100.0).clamp(0.0, 100.0);
+            self.cpu_history.push(cpu);
+            self.memory_history.push(memory);
+            if self.cpu_history.len() > 120 { self.cpu_history.remove(0); }
+            if self.memory_history.len() > 120 { self.memory_history.remove(0); }
             self.last_metrics_refresh = Instant::now();
         }
         self.download_manager.poll();
@@ -2370,6 +2503,7 @@ impl eframe::App for LunarApp {
                             Screen::Servers => self.servers(ui),
                             Screen::Workspace => self.workspace(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
+                            Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
                     });
