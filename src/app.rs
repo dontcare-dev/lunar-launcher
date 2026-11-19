@@ -1107,7 +1107,9 @@ impl LunarApp {
                                 "bytes://lunar-download.svg",
                                 include_bytes!("../assets/icons/download.svg").as_slice(),
                             ).fit_to_exact_size(Vec2::splat(16.0));
-                            let install_ready = !self.content_busy && (self.content_kind == "modpack" || !self.selected_version.is_empty());
+                            let install_ready = !self.content_busy
+                                && (matches!(self.content_kind.as_str(), "modpack" | "resourcepack" | "shader")
+                                    || !self.selected_version.is_empty());
                             if ui.add_enabled(install_ready, egui::Button::image_and_text(install_icon, "Install")).clicked() {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
