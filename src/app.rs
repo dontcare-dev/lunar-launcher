@@ -1107,27 +1107,47 @@ impl LunarApp {
                                 "bytes://lunar-download.svg",
                                 include_bytes!("../assets/icons/download.svg").as_slice(),
                             ).fit_to_exact_size(Vec2::splat(16.0));
+                            let target_instance = self.workspace_instances.iter()
+                                .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref());
+                            let target_minecraft = target_instance.map(|entry| entry.minecraft.as_str())
+                                .unwrap_or(self.selected_version.as_str());
                             let install_ready = !self.content_busy
                                 && (matches!(self.content_kind.as_str(), "modpack" | "resourcepack" | "shader")
-                                    || !self.selected_version.is_empty());
+                                    || !target_minecraft.is_empty());
                             if ui.add_enabled(install_ready, egui::Button::image_and_text(install_icon, "Install")).clicked() {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
                                 let kind = self.content_kind.clone();
-                                let minecraft = self.selected_version.clone();
+                                let selected_instance = self.workspace_instances.iter()
+                                    .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).cloned();
+                                let minecraft = selected_instance.as_ref().map(|entry| entry.minecraft.clone())
+                                    .unwrap_or_else(|| self.selected_version.clone());
                                 let loader = self.content_loader.clone();
-                                let instance_target = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).map(|entry| crate::workspace::instance_path(&self.game_root, entry));
+                                let instance_target = selected_instance.as_ref()
+                                    .map(|entry| crate::workspace::instance_path(&self.game_root, entry));
                                 let (tx, rx) = mpsc::channel();
                                 self.content_install_rx = Some(rx);
                                 self.content_busy = true;
                                 self.status = format!("Installing {}…", project.title);
                                 std::thread::spawn(move || {
-                                    let result = match kind.as_str() {
-                                        "resourcepack" => crate::content::install_resource_pack(&id, instance_target.as_deref().unwrap_or(&root), &minecraft),
-                                        "shader" => crate::content::install_shader_pack(&id, instance_target.as_deref().unwrap_or(&root), &minecraft),
-                                        "mod" => crate::content::install_mod(&id, instance_target.as_deref().unwrap_or(&root), &minecraft, &loader),
-                                        _ => crate::content::install_modpack(&id, &root),
-                                    }.map_err(|error| format!("{error:#}"));
+                                    let result = (|| -> anyhow::Result<String> {
+                                        let target = instance_target.as_deref().unwrap_or(&root);
+                                        match kind.as_str() {
+                                            "resourcepack" => crate::content::install_resource_pack(&id, target, &minecraft),
+                                            "shader" => crate::content::install_shader_pack(&id, target, &minecraft),
+                                            "mod" => {
+                                                crate::content::install_mod(&id, target, &minecraft, &loader)?;
+                                                if let Some(instance) = selected_instance {
+                                                    let mut updated = instance;
+                                                    updated.loader = Some(loader.clone());
+                                                    crate::workspace::save_instance(&root, &updated)?;
+                                                    crate::loaders::prepare_instance(&minecraft, Some(&loader), &root, target)?;
+                                                }
+                                                Ok(format!("Installed mod and required dependencies to {}", target.display()))
+                                            }
+                                            _ => crate::content::install_modpack(&id, &root),
+                                        }
+                                    })().map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
                                 });
                             }
@@ -1416,15 +1436,29 @@ impl LunarApp {
                 ui.label(RichText::new("LAUNCH THIS INSTANCE").strong().size(10.0).color(self.accent));
                 if ui.add_enabled(self.game_process.is_none() && self.install_rx.is_none(), egui::Button::new(RichText::new("Launch instance").strong())).clicked() {
                     if let Some(profile) = self.profiles.profiles.iter().find(|profile| Some(profile.name.as_str()) == self.profiles.selected.as_deref()) {
-                        match launcher::load_installed(&item.minecraft, &self.game_root) {
-                            Ok(mut installed) => {
-                                installed.game_directory = Some(path.clone());
-                                match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode, item.java_major) {
-                                    Ok(process) => { self.game_process = Some(process); if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); } self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Launching {}", item.name); }
-                                    Err(error) => self.status = format!("{error:#}"),
+                        if item.loader.is_some() {
+                            let root = self.game_root.clone();
+                            let mc = item.minecraft.clone();
+                            let loader = item.loader.clone();
+                            let instance_path = path.clone();
+                            let (tx, rx) = mpsc::channel();
+                            self.modpack_launch_rx = Some(rx);
+                            self.status = format!("Preparing {} with {}…", item.name, loader.as_deref().unwrap_or("loader"));
+                            std::thread::spawn(move || {
+                                let _ = tx.send(crate::loaders::prepare_instance(&mc, loader.as_deref(), &root, &instance_path)
+                                    .map_err(|error| format!("{error:#}")));
+                            });
+                        } else {
+                            match launcher::load_installed(&item.minecraft, &self.game_root) {
+                                Ok(mut installed) => {
+                                    installed.game_directory = Some(path.clone());
+                                    match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, item.memory_mb, &self.performance_mode, item.java_major) {
+                                        Ok(process) => { self.game_process = Some(process); if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut item) { self.status = error.to_string(); } self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default(); self.status = format!("Launching {}", item.name); }
+                                        Err(error) => self.status = format!("{error:#}"),
+                                    }
                                 }
+                                Err(error) => self.status = error.to_string(),
                             }
-                            Err(error) => self.status = error.to_string(),
                         }
                     } else { self.status = "Select an offline profile on the Play page first".into(); }
                 }
