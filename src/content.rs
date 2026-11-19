@@ -83,9 +83,12 @@ pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
     Ok(projects)
 }
 
-pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
+pub fn install_resource_pack(project_id: &str, root: &Path, minecraft: &str) -> Result<String> {
     let http = client()?;
-    let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
+    let game_versions = serde_json::to_string(&vec![minecraft])?;
+    let versions = http.get(format!("{API}/project/{project_id}/version"))
+        .query(&[("game_versions", game_versions.as_str())])
+        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
     let version = versions.first().context("No downloadable resource-pack version was found")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The resource-pack version contains no files")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
@@ -101,9 +104,12 @@ pub fn install_resource_pack(project_id: &str, root: &Path) -> Result<String> {
     Ok(destination.display().to_string())
 }
 
-pub fn install_shader_pack(project_id: &str, root: &Path) -> Result<String> {
+pub fn install_shader_pack(project_id: &str, root: &Path, minecraft: &str) -> Result<String> {
     let http = client()?;
-    let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
+    let game_versions = serde_json::to_string(&vec![minecraft])?;
+    let versions = http.get(format!("{API}/project/{project_id}/version"))
+        .query(&[("game_versions", game_versions.as_str())])
+        .send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
     let version = versions.first().context("No downloadable shader-pack version was found")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The shader-pack version contains no files")?;
     let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
@@ -273,6 +279,24 @@ pub fn list_files(root: &Path, kind: &str) -> Result<Vec<PathBuf>> {
         .map(|entry| entry.path()).collect::<Vec<_>>();
     files.sort();
     Ok(files)
+}
+
+pub fn set_file_enabled(path: &Path, enabled: bool) -> Result<PathBuf> {
+    let parent = path.parent().context("Content path is invalid")?.canonicalize()?;
+    let target = path.canonicalize()?;
+    if !target.starts_with(&parent) || !target.is_file() {
+        bail!("Selected content is not a regular file in its managed folder");
+    }
+    let name = target.file_name().and_then(|value| value.to_str()).context("Invalid content filename")?;
+    let disabled = name.ends_with(".disabled");
+    if enabled == !disabled {
+        return Ok(target);
+    }
+    let new_name = if enabled { name.strip_suffix(".disabled").unwrap_or(name).to_owned() } else { format!("{name}.disabled") };
+    let destination = parent.join(new_name);
+    if destination.exists() { bail!("A file with the target name already exists"); }
+    fs::rename(&target, &destination)?;
+    Ok(destination)
 }
 
 pub fn remove_file(path: &Path, root: &Path, kind: &str) -> Result<()> {
