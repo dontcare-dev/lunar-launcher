@@ -656,7 +656,7 @@ impl LunarApp {
                 for (id, title, texture) in featured {
                     let response = egui::Frame::new()
                         .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 190))
-                        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(143, 164, 220, 42)))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(143, 164, 220, 42)))
                         .corner_radius(egui::CornerRadius::same(13))
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
