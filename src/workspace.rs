@@ -209,7 +209,7 @@ pub fn import_instance(archive_path: &Path, root: &Path, name: &str) -> Result<I
     let mut count = 0usize;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else { bail!("Archive contains an unsafe path"); };
+        let Some(relative) = entry.enclosed_name() else { bail!("Archive contains an unsafe path"); };
         if relative.as_os_str().is_empty() { continue; }
         let destination = destination_root.join(relative);
         if entry.is_dir() { fs::create_dir_all(destination)?; }

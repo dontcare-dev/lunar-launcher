@@ -102,7 +102,7 @@ impl DownloadManager {
             let temporary = destination.with_extension("lunar-part");
             let result = (|| -> anyhow::Result<()> {
                 let client = reqwest::blocking::Client::builder().user_agent("Lunar-Launcher").timeout(std::time::Duration::from_secs(600)).build()?;
-                let mut response = client.get(&url).send()?.error_for_status()?;
+                let mut response = client.get(url).send()?.error_for_status()?;
                 let total = response.content_length();
                 let _ = sender.send(Update { id, state: DownloadState::Downloading, downloaded: 0, total });
                 let mut output = fs::File::create(&temporary)?;
