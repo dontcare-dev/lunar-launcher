@@ -2,7 +2,6 @@ package dev.nyx.client.screen;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.GameMenuScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.option.GraphicsMode;
@@ -96,7 +95,12 @@ public final class NyxSettingsScreen extends Screen {
     }
 
     private Text graphicsText() {
-        return Text.literal("GRAPHICS  ·  " + MinecraftClient.getInstance().options.getGraphicsMode().getValue().getName().getString().toUpperCase());
+        String name = switch (MinecraftClient.getInstance().options.getGraphicsMode().getValue()) {
+            case FAST -> "FAST";
+            case FANCY -> "FANCY";
+            case FABULOUS -> "FABULOUS";
+        };
+        return Text.literal("GRAPHICS  ·  " + name);
     }
 
     @Override
