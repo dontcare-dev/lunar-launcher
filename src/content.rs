@@ -220,7 +220,7 @@ pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Res
     let asset_url = releases.iter()
         .filter(|release| release.get("tag_name").and_then(serde_json::Value::as_str).is_some_and(|tag| tag.starts_with("nyx-client-build-")))
         .find_map(|release| release.get("assets").and_then(serde_json::Value::as_array).and_then(|assets| {
-            assets.iter().find(|asset| asset.get("name").and_then(serde_json::Value::as_str).is_some_and(|name| name.starts_with(&format!("nyx-client-{minecraft}-")) && name.ends_with(".jar")))
+            assets.iter().find(|asset| asset.get("name").and_then(serde_json::Value::as_str).is_some_and(|name| name.starts_with(&format!("nyx-client-{minecraft}-")) && name.ends_with(".jar") && !name.ends_with("-sources.jar")))
                 .and_then(|asset| asset.get("browser_download_url"))
                 .and_then(serde_json::Value::as_str)
         }))
