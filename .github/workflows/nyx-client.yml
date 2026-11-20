@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "nyx-client/**"
+      - "nyx-client-modern/**"
       - ".github/workflows/nyx-client.yml"
   workflow_dispatch:
 
