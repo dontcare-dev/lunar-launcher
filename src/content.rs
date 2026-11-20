@@ -619,4 +619,19 @@ mod tests {
         assert!(search("", "unknown").is_err());
     }
 
+    #[test]
+    fn installed_project_status_tracks_installed_files() {
+        let root = std::env::temp_dir().join(format!("lunar-installed-state-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let installed = root.join("mods").join("sample.jar");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        fs::write(&installed, b"test").unwrap();
+        mark_project_installed(&root, "mod", "project-123", installed.to_str().unwrap()).unwrap();
+        assert!(project_is_installed(&root, "mod", "project-123"));
+        fs::remove_file(&installed).unwrap();
+        assert!(!project_is_installed(&root, "mod", "project-123"));
+        let _ = fs::remove_dir_all(root);
+    }
+
 }
