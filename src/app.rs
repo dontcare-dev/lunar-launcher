@@ -189,7 +189,6 @@ pub struct LunarApp {
     skin_preview_texture: Option<egui::TextureHandle>,
     skin_overlay_layer: bool,
     skin_selected_part: String,
-    skin_selected_part: String,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
     active_install_task: Option<u64>,
@@ -301,7 +300,6 @@ impl LunarApp {
             skin_rotation: 0.45,
             skin_preview_texture: None,
             skin_overlay_layer: false,
-            skin_selected_part: "All".into(),
             skin_selected_part: "All".into(),
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
@@ -2482,7 +2480,7 @@ impl LunarApp {
                 }
             }
         });
-        if let Some(analysis) = self.crash_analysis.clone() {
+        if let Some(mut analysis) = self.crash_analysis.clone() {
             ui.add_space(10.0);
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.label(RichText::new(&analysis.summary).strong().size(16.0).color(self.accent));
