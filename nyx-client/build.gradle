@@ -39,3 +39,8 @@ java {
 jar {
     archiveFileName = "nyx-client.jar"
 }
+
+
+tasks.named("remapJar") {
+    archiveFileName = "nyx-client.jar"
+}
