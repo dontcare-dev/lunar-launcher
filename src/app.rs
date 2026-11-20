@@ -586,19 +586,10 @@ impl LunarApp {
     }
 
     fn launch_selected(&mut self) {
-        let microsoft_account = self.microsoft_account.clone();
-        let offline_profile = if microsoft_account.is_none() {
-            let Some(name) = self.profiles.selected.clone() else {
-                self.status = "Sign in with Microsoft or select an offline profile first".into();
-                return;
-            };
-            let Some(profile) = self.profiles.profiles.iter().find(|profile| profile.name == name).cloned() else {
-                self.status = "Selected offline profile could not be found".into();
-                return;
-            };
-            Some(profile)
-        } else {
-            None
+        let Some(microsoft_account) = self.microsoft_account.clone() else {
+            self.status = "Sign in with a Microsoft account that owns Minecraft Java Edition to launch".into();
+            self.screen = Screen::Profiles;
+            return;
         };
         let installed = match self.installed_version.clone() {
             Some(installed) if installed.id == self.selected_version => installed,
@@ -627,13 +618,7 @@ impl LunarApp {
             });
             return;
         }
-        let launch_result = if let Some(account) = microsoft_account.as_ref() {
-            launcher::launch_with_account(&installed, account, self.memory_mb, &self.performance_mode)
-        } else if let Some(profile) = offline_profile.as_ref() {
-            launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode)
-        } else {
-            return;
-        };
+        let launch_result = launcher::launch_with_account(&installed, &microsoft_account, self.memory_mb, &self.performance_mode);
         match launch_result {
             Ok(process) => {
                 self.installed_version = Some(installed.clone());
@@ -1382,13 +1367,13 @@ impl LunarApp {
                             });
                         }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
-                            if self.microsoft_account.is_some() || self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|p| &p.name == name)) {
+                            if self.microsoft_account.is_some() {
                                 let root = self.game_root.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.modpack_launch_rx = Some(rx);
                                 self.status = format!("Preparing {}…", pack.name);
                                 std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
-                            } else { self.status = "Sign in with Microsoft or select an offline profile first".into(); }
+                            } else { self.status = "Sign in with Microsoft to launch a modpack".into(); }
                         }
                     });
                 });
@@ -2072,22 +2057,11 @@ impl eframe::App for LunarApp {
             self.modpack_launch_rx = None;
             match result {
                 Ok(mut installed) => {
-                    let microsoft_account = self.microsoft_account.clone();
-                    let offline_profile = self.profiles.profiles.iter().find(|profile| {
-                        Some(profile.name.as_str()) == self.profiles.selected.as_deref()
-                    }).cloned();
-                    if microsoft_account.is_some() || offline_profile.is_some() {
+                    if let Some(account) = self.microsoft_account.clone() {
                         if let Some(mut instance) = self.pending_instance_launch.take() {
                             let instance_path = crate::workspace::instance_path(&self.game_root, &instance);
                             installed.game_directory = Some(instance_path);
-                            let result = if let Some(account) = microsoft_account.as_ref() {
-                                launcher::launch_with_account(&installed, account, instance.memory_mb, &self.performance_mode)
-                            } else if let Some(profile) = offline_profile.as_ref() {
-                                launcher::launch_with_java(&installed, &profile.name, &profile.uuid, instance.memory_mb, &self.performance_mode, instance.java_major)
-                            } else {
-                                return;
-                            };
-                            match result {
+                            match launcher::launch_with_account(&installed, &account, instance.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
@@ -2098,14 +2072,7 @@ impl eframe::App for LunarApp {
                                 Err(error) => self.status = format!("{error:#}"),
                             }
                         } else {
-                            let result = if let Some(account) = microsoft_account.as_ref() {
-                                launcher::launch_with_account(&installed, account, self.memory_mb, &self.performance_mode)
-                            } else if let Some(profile) = offline_profile.as_ref() {
-                                launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode)
-                            } else {
-                                return;
-                            };
-                            match result {
+                            match launcher::launch_with_account(&installed, &account, self.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), None);
@@ -2116,7 +2083,7 @@ impl eframe::App for LunarApp {
                         }
                     } else {
                         self.pending_instance_launch = None;
-                        self.status = "Sign in with Microsoft or select an offline profile first".into();
+                        self.status = "Sign in with Microsoft to launch a modpack".into();
                     }
                 }
                 Err(error) => {
