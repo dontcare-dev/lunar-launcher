@@ -76,6 +76,7 @@ enum Screen {
     LivePerformance,
     PlayStats,
     SkinManager,
+    Downloads,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -164,6 +165,9 @@ pub struct LunarApp {
     skin_editor: Option<image::RgbaImage>,
     skin_editor_profile: String,
     skin_color: Color32,
+    skin_rotation: f32,
+    downloads: crate::downloads::DownloadManager,
+    download_url: String,
 }
 
 impl LunarApp {
@@ -264,6 +268,9 @@ impl LunarApp {
             skin_editor: None,
             skin_editor_profile: String::new(),
             skin_color: Color32::from_rgb(151, 169, 255),
+            skin_rotation: 0.45,
+            downloads: crate::downloads::DownloadManager::default(),
+            download_url: String::new(),
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -691,7 +698,10 @@ impl LunarApp {
         ui.add_space(8.0);
         ui.label(RichText::new(title).font(FontId::proportional(30.0)).strong());
         ui.label(RichText::new(subtitle).color(Color32::from_rgb(145, 153, 171)).size(13.0));
-        ui.add_space(20.0);
+        ui.add_space(9.0);
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().line_segment([rect.left_top(), egui::pos2(rect.left() + 74.0, rect.top())], Stroke::new(2.0, Color32::from_rgba_unmultiplied(151, 169, 255, 170)));
+        ui.add_space(11.0);
     }
 
     fn nav_button(ui: &mut egui::Ui, label: &str, active: bool, uri: &'static str, icon: &'static [u8]) -> egui::Response {
@@ -734,6 +744,7 @@ impl LunarApp {
                         ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                         ("Skin Manager", Screen::SkinManager, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
+                        ("Download Center", Screen::Downloads, "bytes://lunar-download.svg", include_bytes!("../assets/icons/download.svg")),
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -1799,6 +1810,159 @@ impl LunarApp {
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
 
+    fn download_center_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Download Center", "Manage direct downloads and keep a persistent record of their status.");
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(RichText::new("ADD DOWNLOAD").strong().size(11.0).color(self.accent));
+            ui.horizontal(|ui| {
+                ui.add_sized([ui.available_width() - 116.0, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste an HTTPS download URL"));
+                if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Download")).clicked() {
+                    match self.downloads.enqueue(self.download_url.trim(), self.game_root.join("downloads")) {
+                        Ok(id) => {
+                            self.status = format!("Download #{id} queued");
+                            self.download_url.clear();
+                        }
+                        Err(error) => self.status = format!("Could not queue download: {error}"),
+                    }
+                }
+            });
+            ui.label(RichText::new("Files are saved in Lunar's downloads folder. Only HTTP and HTTPS links are accepted.").size(10.0).color(Color32::GRAY));
+        });
+        ui.add_space(12.0);
+        let tasks = self.downloads.tasks().to_vec();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("DOWNLOAD HISTORY · {}", tasks.len())).strong().color(self.accent));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.add_enabled(tasks.iter().any(|task| matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Failed(_) | crate::downloads::DownloadState::Cancelled)), egui::Button::new("Clear finished")).clicked() {
+                    self.downloads.clear_finished();
+                }
+            });
+        });
+        if tasks.is_empty() {
+            ui.group(|ui| {
+                ui.label(RichText::new("No downloads yet").strong());
+                ui.label("Downloads you add here will appear with live progress, pause and retry controls.");
+            });
+        }
+        egui::ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
+            for task in tasks.iter().rev() {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&task.filename).strong());
+                            ui.label(RichText::new(task.destination.display().to_string()).size(9.0).color(Color32::GRAY));
+                            ui.label(RichText::new(task.state.label()).size(10.0).color(match task.state {
+                                crate::downloads::DownloadState::Completed => Color32::from_rgb(112, 215, 157),
+                                crate::downloads::DownloadState::Failed(_) => Color32::from_rgb(230, 130, 130),
+                                crate::downloads::DownloadState::Cancelled => Color32::GRAY,
+                                _ => self.accent,
+                            }));
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if matches!(task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
+                                if ui.small_button("Cancel").clicked() { self.downloads.cancel(task.id); }
+                            }
+                            match &task.state {
+                                crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading => {
+                                    if ui.small_button("Pause").clicked() { self.downloads.pause(task.id); }
+                                }
+                                crate::downloads::DownloadState::Paused => {
+                                    if ui.small_button("Resume").clicked() { self.downloads.resume(task.id); }
+                                }
+                                crate::downloads::DownloadState::Failed(_) | crate::downloads::DownloadState::Cancelled => {
+                                    if ui.small_button("Retry").clicked() {
+                                        match self.downloads.retry(task.id) {
+                                            Ok(new_id) => self.status = format!("Retry #{new_id} queued"),
+                                            Err(error) => self.status = error.to_string(),
+                                        }
+                                    }
+                                }
+                                crate::downloads::DownloadState::Completed => {}
+                            }
+                        });
+                    });
+                    if let Some(total) = task.total {
+                        let fraction = if total == 0 { 0.0 } else { (task.downloaded as f32 / total as f32).clamp(0.0, 1.0) };
+                        ui.add(egui::ProgressBar::new(fraction).text(format!("{:.1} / {:.1} MB", task.downloaded as f64 / 1_048_576.0, total as f64 / 1_048_576.0)));
+                    } else if matches!(task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
+                        ui.add(egui::ProgressBar::new(0.0).text(format!("{:.1} MB downloaded", task.downloaded as f64 / 1_048_576.0)));
+                    }
+                });
+            }
+        });
+    }
+
+    fn skin_preview(&mut self, ui: &mut egui::Ui, skin: &image::RgbaImage) {
+        ui.label(RichText::new("3D CHARACTER PREVIEW").size(10.0).strong().color(self.accent));
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(300.0, 310.0), egui::Sense::drag());
+        if response.dragged() {
+            self.skin_rotation += response.drag_delta().x * 0.012;
+        }
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, egui::CornerRadius::same(16), Color32::from_rgba_unmultiplied(16, 22, 37, 235));
+        painter.circle_filled(egui::pos2(rect.center().x, rect.bottom() - 35.0), 76.0, Color32::from_rgba_unmultiplied(90, 112, 170, 18));
+        let sample = |x: u32, y: u32, w: u32, h: u32| {
+            let scale_x = (skin.width() / 64).max(1);
+            let scale_y = (skin.height() / 64).max(1);
+            let x0 = x.saturating_mul(scale_x).min(skin.width().saturating_sub(1));
+            let y0 = y.saturating_mul(scale_y).min(skin.height().saturating_sub(1));
+            let x1 = (x + w).saturating_mul(scale_x).min(skin.width());
+            let y1 = (y + h).saturating_mul(scale_y).min(skin.height());
+            let mut total = [0_u64; 4];
+            let mut count = 0_u64;
+            for py in y0..y1.max(y0 + 1) {
+                for px in x0..x1.max(x0 + 1) {
+                    let pixel = skin.get_pixel(px.min(skin.width()-1), py.min(skin.height()-1));
+                    for channel in 0..4 { total[channel] += pixel[channel] as u64; }
+                    count += 1;
+                }
+            }
+            Color32::from_rgba_unmultiplied((total[0]/count) as u8, (total[1]/count) as u8, (total[2]/count) as u8, (total[3]/count) as u8)
+        };
+        let parts = [
+            ((0.0, -3.0, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8)),
+            ((0.0, -1.72, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12)),
+            ((-0.82, -1.78, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12)),
+            ((0.82, -1.78, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12)),
+            ((-0.28, -0.35, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12)),
+            ((0.28, -0.35, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12)),
+        ];
+        let yaw = self.skin_rotation;
+        let (sin, cos) = yaw.sin_cos();
+        let project = |point: (f32, f32, f32)| {
+            let rx = point.0 * cos + point.2 * sin;
+            let rz = -point.0 * sin + point.2 * cos;
+            (egui::pos2(rect.center().x + rx * 57.0, rect.center().y - point.1 * 57.0 + rz * 13.0), rz)
+        };
+        let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
+        for (center, size, base) in parts {
+            let (cx, cy, cz) = center;
+            let (sx, sy, sz) = (size.0/2.0, size.1/2.0, size.2/2.0);
+            let vertices = [
+                (cx-sx,cy-sy,cz-sz),(cx+sx,cy-sy,cz-sz),(cx+sx,cy+sy,cz-sz),(cx-sx,cy+sy,cz-sz),
+                (cx-sx,cy-sy,cz+sz),(cx+sx,cy-sy,cz+sz),(cx+sx,cy+sy,cz+sz),(cx-sx,cy+sy,cz+sz),
+            ];
+            let indices = [[4,5,6,7],[0,4,7,3],[5,1,2,6],[3,7,6,2],[0,1,5,4]];
+            for (face_index, face) in indices.iter().enumerate() {
+                let projected = face.iter().map(|index| project(vertices[*index])).collect::<Vec<_>>();
+                let depth = projected.iter().map(|point| point.1).sum::<f32>() / 4.0;
+                let factor = [1.0, 0.62, 0.82, 1.16, 0.48][face_index];
+                let color = Color32::from_rgba_unmultiplied(
+                    (base.r() as f32 * factor).clamp(0.0,255.0) as u8,
+                    (base.g() as f32 * factor).clamp(0.0,255.0) as u8,
+                    (base.b() as f32 * factor).clamp(0.0,255.0) as u8,
+                    base.a(),
+                );
+                faces.push((depth, projected.into_iter().map(|point| point.0).collect(), color));
+            }
+        }
+        faces.sort_by(|a,b| a.0.total_cmp(&b.0));
+        for (_, points, color) in faces {
+            painter.add(egui::Shape::convex_polygon(points, color, Stroke::new(1.0, Color32::from_rgba_unmultiplied(5, 8, 16, 190))));
+        }
+        painter.text(egui::pos2(rect.center().x, rect.bottom()-16.0), egui::Align2::CENTER_CENTER, "DRAG TO ROTATE", FontId::proportional(9.0), Color32::from_gray(145));
+    }
+
     fn skin_manager_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Skin Manager", "Create, paint, preview and apply a custom Minecraft skin.");
         let selected = self.profiles.selected.clone().unwrap_or_default();
@@ -1848,6 +2012,10 @@ impl LunarApp {
             ui.label("Brush colour");
         });
         ui.add_space(8.0);
+        if let Some(preview_skin) = self.skin_editor.clone() {
+            self.skin_preview(ui, &preview_skin);
+            ui.add_space(10.0);
+        }
         let mut save_requested = false;
         let mut reload_requested = false;
         let mut remove_requested = false;
@@ -2173,6 +2341,7 @@ impl eframe::App for LunarApp {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
         self.poll_microsoft_login(ctx);
+        self.downloads.poll();
         if self.last_metrics_refresh.elapsed() >= Duration::from_secs(1) {
             self.system_monitor.refresh_all();
             let cpu = self.system_monitor.global_cpu_usage().clamp(0.0, 100.0);
@@ -2301,6 +2470,7 @@ impl eframe::App for LunarApp {
             || self.content_install_rx.is_some()
             || self.modpack_launch_rx.is_some()
             || self.java_install_rx.is_some()
+            || self.downloads.has_active()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
@@ -2334,6 +2504,7 @@ impl eframe::App for LunarApp {
                             Screen::Servers => self.servers(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
                             Screen::SkinManager => self.skin_manager_ui(ui),
+                            Screen::Downloads => self.download_center_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
