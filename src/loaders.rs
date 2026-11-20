@@ -128,6 +128,11 @@ fn generated_profile(mc: &str, root: &Path, instance: &Path, loader: &str, reque
 }
 
 fn forge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<InstalledVersion> {
+    if !requested.is_empty()
+        && let Ok(profile) = generated_profile(mc, root, instance, "forge", Some(requested))
+    {
+        return Ok(profile);
+    }
     if !launcher::installed_versions(root)?.contains(mc) { launcher::install(mc, root, |_| {})?; }
     let promos = fetch_profile("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")?;
     let recommended = format!("{mc}-recommended");
@@ -143,6 +148,11 @@ fn forge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<Inst
 }
 
 fn neoforge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<InstalledVersion> {
+    if !requested.is_empty()
+        && let Ok(profile) = generated_profile(mc, root, instance, "neoforge", Some(requested))
+    {
+        return Ok(profile);
+    }
     if !launcher::installed_versions(root)?.contains(mc) { launcher::install(mc, root, |_| {})?; }
     let versions = fetch_profile("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")?;
     let prefix = mc.strip_prefix("1.").unwrap_or(mc).split('.').take(2).collect::<Vec<_>>().join(".");
