@@ -1877,7 +1877,7 @@ impl LunarApp {
     }
 
     fn download_center_ui(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Download Center", "Manage direct downloads and keep a persistent record of their status.");
+        Self::heading(ui, "Download Center", "Track direct downloads and Lunar installation tasks in one persistent history.");
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.label(RichText::new("ADD DOWNLOAD").strong().size(11.0).color(self.accent));
             ui.horizontal(|ui| {
@@ -1925,7 +1925,10 @@ impl LunarApp {
                                 _ => self.accent,
                             }));
                         });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if task.url.starts_with("lunar://") {
+                            ui.label(RichText::new("LUNAR TASK").size(9.0).strong().color(self.accent));
+                        } else {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if matches!(&task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
                                 if ui.small_button("Cancel").clicked() { self.downloads.cancel(task.id); }
                             }
@@ -1946,12 +1949,13 @@ impl LunarApp {
                                 }
                                 crate::downloads::DownloadState::Completed => {}
                             }
-                        });
+                            });
+                        }
                     });
                     if let Some(total) = task.total {
                         let fraction = if total == 0 { 0.0 } else { (task.downloaded as f32 / total as f32).clamp(0.0, 1.0) };
                         ui.add(egui::ProgressBar::new(fraction).text(format!("{:.1} / {:.1} MB", task.downloaded as f64 / 1_048_576.0, total as f64 / 1_048_576.0)));
-                    } else if matches!(&task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
+                    } else if !task.url.starts_with("lunar://") && matches!(&task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
                         ui.add(egui::ProgressBar::new(0.0).text(format!("{:.1} MB downloaded", task.downloaded as f64 / 1_048_576.0)));
                     }
                     egui::CollapsingHeader::new(format!("Activity log · {} entries", task.logs.len()))
