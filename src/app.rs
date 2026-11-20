@@ -1947,19 +1947,19 @@ impl LunarApp {
             Color32::from_rgba_unmultiplied((total[0]/count) as u8, (total[1]/count) as u8, (total[2]/count) as u8, (total[3]/count) as u8)
         };
         let parts = [
-            ((0.0, -3.0, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8)),
-            ((0.0, -1.72, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12)),
-            ((-0.82, -1.78, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12)),
-            ((0.82, -1.78, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12)),
-            ((-0.28, -0.35, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12)),
-            ((0.28, -0.35, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12)),
+            ((0.0, 2.65, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8)),
+            ((0.0, 1.35, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12)),
+            ((-0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12)),
+            ((0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12)),
+            ((-0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12)),
+            ((0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12)),
         ];
         let yaw = self.skin_rotation;
         let (sin, cos) = yaw.sin_cos();
         let project = |point: (f32, f32, f32)| {
             let rx = point.0 * cos + point.2 * sin;
             let rz = -point.0 * sin + point.2 * cos;
-            (egui::pos2(rect.center().x + rx * 57.0, rect.center().y - point.1 * 57.0 + rz * 13.0), rz)
+            (egui::pos2(rect.center().x + rx * 45.0, rect.center().y - point.1 * 45.0 + rz * 9.0), rz)
         };
         let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
         for (center, size, base) in parts {
