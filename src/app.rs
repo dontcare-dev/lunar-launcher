@@ -805,25 +805,20 @@ impl LunarApp {
     }
 
     fn play(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Play", "Choose an offline profile, select a version and launch.");
+        Self::heading(ui, "Play", "Sign in with Microsoft, choose a Minecraft version and launch.");
         ui.group(|ui| {
-            ui.label(RichText::new("PLAYER").size(10.0).color(Color32::GRAY).strong());
+            ui.label(RichText::new("MICROSOFT PLAYER").size(10.0).color(Color32::GRAY).strong());
             ui.add_space(6.0);
-            let previous_profile = self.profiles.selected.clone();
-            egui::ComboBox::from_id_salt("play_profile")
-                .selected_text(self.profiles.selected.as_deref().unwrap_or("Select offline profile"))
-                .show_ui(ui, |ui| {
-                    for profile in &self.profiles.profiles {
-                        ui.selectable_value(&mut self.profiles.selected, Some(profile.name.clone()), &profile.name);
-                    }
-                });
-            if previous_profile != self.profiles.selected
-                && let Some(name) = self.profiles.selected.clone()
-                && let Err(error) = self.profiles.select(&name)
-            {
-                self.status = error.to_string();
+            if let Some(account_name) = self.microsoft_account.as_ref().map(|account| account.name.clone()) {
+                ui.label(RichText::new(account_name).size(18.0).strong());
+                ui.label(RichText::new("Authenticated Minecraft account").size(11.0).color(Color32::GRAY));
+            } else {
+                ui.label("No Microsoft account connected");
+                if ui.button("Connect Microsoft account").clicked() {
+                    self.screen = Screen::Profiles;
+                }
             }
-            if ui.button("Manage profiles").clicked() {
+            if ui.button("Manage accounts").clicked() {
                 self.screen = Screen::Profiles;
             }
         });
@@ -1008,7 +1003,7 @@ impl LunarApp {
     }
 
     fn profiles(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Profiles", "Choose a Microsoft account or a local offline profile.");
+        Self::heading(ui, "Profiles", "Connect a Microsoft account to play Minecraft Java Edition.");
         ui.group(|ui| {
             ui.label(RichText::new("MICROSOFT ACCOUNT").size(10.0).color(self.accent).strong());
             if let Some(account_name) = self.microsoft_account.as_ref().map(|account| account.name.clone()) {
@@ -1034,8 +1029,8 @@ impl LunarApp {
             }
         });
         ui.add_space(12.0);
-        ui.label(RichText::new("OFFLINE PROFILES").size(10.0).color(Color32::GRAY).strong());
-        ui.label(RichText::new("Offline profiles do not authenticate with Microsoft or grant game ownership. They only work on servers that allow offline-mode accounts.").size(11.0).color(Color32::GRAY));
+        ui.label(RichText::new("LOCAL PROFILE LABELS").size(10.0).color(Color32::GRAY).strong());
+        ui.label(RichText::new("Local profile labels do not authenticate or grant game ownership. A Microsoft account with Minecraft Java Edition is required to launch.").size(11.0).color(Color32::GRAY));
         ui.group(|ui| {
             ui.label(RichText::new("CREATE PROFILE").size(10.0).color(Color32::GRAY).strong());
             ui.horizontal(|ui| {
