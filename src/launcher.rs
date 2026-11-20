@@ -671,6 +671,11 @@ pub fn launch_with_java(installed: &InstalledVersion, username: &str, uuid: &str
         .args(game)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
     let mut child = command.spawn().context("Could not start Minecraft. Check that a compatible Java runtime is installed.")?;
     if let Some(stdout) = child.stdout.take() {
         let log = Arc::clone(&log);
