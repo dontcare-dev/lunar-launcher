@@ -1171,10 +1171,15 @@ impl LunarApp {
                                 .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref());
                             let target_minecraft = target_instance.map(|entry| entry.minecraft.as_str())
                                 .unwrap_or(self.selected_version.as_str());
+                            let install_root = if self.content_kind == "modpack" { &self.game_root } else { &content_root };
+                            let already_installed = crate::content::project_is_installed(install_root, &self.content_kind, &project.project_id)
+                                || (self.content_kind == "modpack" && self.installed_packs.iter().any(|pack| pack.name.eq_ignore_ascii_case(&project.title)));
                             let install_ready = !self.content_busy
+                                && !already_installed
                                 && (matches!(self.content_kind.as_str(), "modpack" | "resourcepack" | "shader")
                                     || !target_minecraft.is_empty());
-                            if ui.add_enabled(install_ready, egui::Button::image_and_text(install_icon, "Install")).clicked() {
+                            let action_label = if already_installed { "Installed" } else { "Install" };
+                            if ui.add_enabled(install_ready, egui::Button::image_and_text(install_icon, action_label)).clicked() {
                                 let id = project.project_id.clone();
                                 let root = self.game_root.clone();
                                 let kind = self.content_kind.clone();
@@ -1192,9 +1197,9 @@ impl LunarApp {
                                 std::thread::spawn(move || {
                                     let result = (|| -> anyhow::Result<String> {
                                         let target = instance_target.as_deref().unwrap_or(&root);
-                                        match kind.as_str() {
-                                            "resourcepack" => crate::content::install_resource_pack(&id, target, &minecraft),
-                                            "shader" => crate::content::install_shader_pack(&id, target, &minecraft),
+                                        let installed = match kind.as_str() {
+                                            "resourcepack" => crate::content::install_resource_pack(&id, target, &minecraft)?,
+                                            "shader" => crate::content::install_shader_pack(&id, target, &minecraft)?,
                                             "mod" => {
                                                 crate::content::install_mod(&id, target, &minecraft, &loader)?;
                                                 if let Some(instance) = selected_instance {
@@ -1203,10 +1208,13 @@ impl LunarApp {
                                                     crate::workspace::save_instance(&root, &updated)?;
                                                     crate::loaders::prepare_instance(&minecraft, Some(&loader), &root, target)?;
                                                 }
-                                                Ok(format!("Installed mod and required dependencies to {}", target.display()))
+                                                format!("Installed mod and required dependencies to {}", target.display())
                                             }
-                                            _ => crate::content::install_modpack(&id, &root),
-                                        }
+                                            _ => crate::content::install_modpack(&id, &root)?,
+                                        };
+                                        let registry_root = if kind == "modpack" { root.as_path() } else { target };
+                                        crate::content::mark_project_installed(registry_root, &kind, &id)?;
+                                        Ok(installed)
                                     })().map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
                                 });
