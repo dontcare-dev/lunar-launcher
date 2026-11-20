@@ -2867,14 +2867,21 @@ impl eframe::App for LunarApp {
                         .inner_margin(egui::Margin::same(14))
                         .show(ui, |ui| {
                             ui.set_min_width(250.0);
+                            let active_download = self.downloads.tasks().iter().find(|task| matches!(&task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused));
                             ui.horizontal(|ui| {
                                 ui.spinner();
                                 ui.vertical(|ui| {
-                                    ui.label(RichText::new("Lunar is downloading").strong());
-                                    ui.label(RichText::new(&self.status).size(10.0).color(Color32::from_rgb(180, 190, 210)));
+                                    ui.label(RichText::new(active_download.map(|task| task.filename.as_str()).unwrap_or("Lunar is working")).strong());
+                                    ui.label(RichText::new(active_download.map(|task| task.state.label()).unwrap_or_else(|| self.status.clone())).size(10.0).color(Color32::from_rgb(180, 190, 210)));
                                 });
                             });
-                            if let Some(progress) = &self.install_progress {
+                            if let Some(task) = active_download
+                                && let Some(total) = task.total
+                                && total > 0
+                            {
+                                let fraction = (task.downloaded as f32 / total as f32).clamp(0.0, 1.0);
+                                ui.add(egui::ProgressBar::new(fraction).text(format!("{:.1} / {:.1} MB", task.downloaded as f64 / 1_048_576.0, total as f64 / 1_048_576.0)));
+                            } else if let Some(progress) = &self.install_progress {
                                 let fraction = if progress.total == 0 { 0.0 } else { progress.completed as f32 / progress.total as f32 };
                                 ui.add(egui::ProgressBar::new(fraction).text(format!("{} · {}/{}", progress.phase, progress.completed, progress.total)));
                             }
