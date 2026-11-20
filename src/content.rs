@@ -23,6 +23,8 @@ pub struct Project {
 #[derive(Deserialize)]
 struct ProjectVersion {
     #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
     files: Vec<VersionFile>,
     #[serde(default)]
     dependencies: Vec<VersionDependency>,
@@ -330,10 +332,59 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
     Ok(instance.display().to_string())
 }
 
+fn install_required_mod_dependencies(dependencies: &[VersionDependency], instance: &Path, minecraft: &str, loader: &str) -> Result<Vec<String>> {
+    let http = client()?;
+    let mods_directory = instance.join("mods");
+    let mut seen = std::collections::HashSet::new();
+    let mut installed = Vec::new();
+    for dependency in dependencies.iter().filter(|dependency| dependency.dependency_type.as_deref() == Some("required")) {
+        let key = dependency.project_id.as_deref().or(dependency.version_id.as_deref()).unwrap_or_default();
+        if key.is_empty() || !seen.insert(key.to_owned()) { continue; }
+        let version = if let Some(version_id) = dependency.version_id.as_deref() {
+            http.get(format!("{API}/version/{version_id}")).send()?.error_for_status()?.json::<ProjectVersion>()?
+        } else if let Some(project_id) = dependency.project_id.as_deref() {
+            let metadata = http.get(format!("{API}/project/{project_id}")).send()?.error_for_status()?.json::<serde_json::Value>()?;
+            match metadata.get("project_type").and_then(serde_json::Value::as_str) {
+                Some("mod") => {
+                    let version = project_versions(project_id, Some(minecraft), Some(loader))?
+                        .into_iter().find(|version| !version.files.is_empty())
+                        .with_context(|| format!("Required mod dependency {project_id} has no compatible release for Minecraft {minecraft} and {loader}"))?;
+                    let paths = download_mod_version(&version, &mods_directory, &mut seen, 0, minecraft, loader)
+                        .with_context(|| format!("Could not install required mod dependency {project_id}"))?;
+                    installed.extend(paths);
+                    continue;
+                }
+                Some("resourcepack") => {
+                    installed.push(save_project_file(project_id, instance, "resourcepacks", "required resource pack", None, None)?);
+                    continue;
+                }
+                Some("shader") => {
+                    installed.push(save_project_file(project_id, instance, "shaderpacks", "required shader pack", None, None)?);
+                    continue;
+                }
+                Some(kind) => bail!("Required dependency {project_id} is a {kind}; Lunar cannot merge that project type into this modpack yet"),
+                None => bail!("Modrinth did not identify the type of required dependency {project_id}"),
+            }
+        } else {
+            continue;
+        };
+        if let Some(project_id) = version.project_id.as_deref() {
+            let metadata = http.get(format!("{API}/project/{project_id}")).send()?.error_for_status()?.json::<serde_json::Value>()?;
+            if metadata.get("project_type").and_then(serde_json::Value::as_str) != Some("mod") {
+                bail!("Required version dependency {key} is not a Minecraft mod");
+            }
+        }
+        installed.extend(download_mod_version(&version, &mods_directory, &mut seen, 0, minecraft, loader)
+            .with_context(|| format!("Could not install required mod dependency {key}"))?);
+    }
+    Ok(installed)
+}
+
 pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let http = client()?;
     let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
     let version = versions.first().context("No modpack version was found")?;
+    let dependencies = version.dependencies.clone();
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The modpack version contains no file")?;
     let expected = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"));
     let mut downloaded = None;
@@ -351,7 +402,19 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
         }
     }
     let bytes = downloaded.context("Could not download or verify the modpack archive after three attempts")?;
-    install_modpack_bytes(&bytes, root)
+    let instance_path = install_modpack_bytes(&bytes, root)?;
+    if !dependencies.is_empty() {
+        let instance = PathBuf::from(&instance_path);
+        let profile_path = instance.parent().context("Modpack directory is invalid")?.join("lunar-modpack.json");
+        let profile: serde_json::Value = serde_json::from_slice(&fs::read(profile_path)?)?;
+        let minecraft = profile.get("minecraft").and_then(serde_json::Value::as_str).context("Modpack Minecraft version is missing")?;
+        let loader = profile.get("loaders").and_then(serde_json::Value::as_object)
+            .and_then(|loaders| loaders.iter().find(|(key, _)| key.as_str() != "minecraft"))
+            .map(|(key, _)| key.trim_end_matches("-loader").to_owned())
+            .unwrap_or_else(|| "fabric".to_owned());
+        install_required_mod_dependencies(&dependencies, &instance, minecraft, &loader)?;
+    }
+    Ok(instance_path)
 }
 
 
