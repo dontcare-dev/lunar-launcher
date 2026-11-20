@@ -251,6 +251,45 @@ pub fn install_shader_pack(project_id: &str, root: &Path, _minecraft: &str) -> R
     save_project_file(project_id, root, "shaderpacks", "shader pack", None, None)
 }
 
+fn discover_modpack_dependencies(files: &[PackFile]) -> Result<Vec<VersionDependency>> {
+    let hashes = files.iter()
+        .filter(|item| item.path.to_ascii_lowercase().ends_with(".jar"))
+        .filter(|item| item.downloads.iter().any(|url| url.contains("cdn.modrinth.com")))
+        .filter_map(|item| item.hashes.get("sha1").cloned())
+        .collect::<Vec<_>>();
+    if hashes.is_empty() { return Ok(Vec::new()); }
+    let http = client()?;
+    let queue = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(hashes)));
+    let dependencies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<VersionDependency>::new()));
+    let workers = queue.lock().map_err(|_| anyhow!("Dependency queue is unavailable"))?.len().min(4);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let queue = std::sync::Arc::clone(&queue);
+            let dependencies = std::sync::Arc::clone(&dependencies);
+            let http = http.clone();
+            scope.spawn(move || loop {
+                let hash = queue.lock().ok().and_then(|mut queue| queue.pop_front());
+                let Some(hash) = hash else { break };
+                if let Ok(response) = http.get(format!("{API}/version_file/{hash}?algorithm=sha1")).send()
+                    && let Ok(response) = response.error_for_status()
+                    && let Ok(version) = response.json::<serde_json::Value>()
+                    && let Some(values) = version.get("dependencies").cloned()
+                    && let Ok(mut found) = serde_json::from_value::<Vec<VersionDependency>>(values)
+                {
+                    if let Ok(mut dependencies) = dependencies.lock() {
+                        dependencies.append(&mut found);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(800));
+            });
+        }
+    });
+    std::sync::Arc::try_unwrap(dependencies)
+        .map_err(|_| anyhow!("Could not collect modpack dependency metadata"))?
+        .into_inner()
+        .map_err(|_| anyhow!("Could not read modpack dependency metadata"))
+}
+
 pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
     let mut archive = ZipArchive::new(Cursor::new(bytes)).context("This is not a valid Modrinth .mrpack file")?;
     let mut manifest_file = archive.by_name("modrinth.index.json").context("Modpack manifest is missing")?;
@@ -333,29 +372,15 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
         fs::write(destination, bytes)?;
     }
-    if !recovered_dependencies.is_empty() {
+    let mut dependencies = recovered_dependencies;
+    dependencies.extend(discover_modpack_dependencies(&manifest.files)?);
+    if !dependencies.is_empty() {
         let minecraft = manifest.dependencies.get("minecraft").context("Modpack Minecraft version is missing")?;
         let loader = manifest.dependencies.iter()
             .find(|(key, _)| key.as_str() != "minecraft")
             .map(|(key, _)| key.trim_end_matches("-loader").to_owned())
             .unwrap_or_else(|| "fabric".to_owned());
-        let mods_directory = instance.join("mods");
-        let mut seen = std::collections::HashSet::new();
-        for dependency in recovered_dependencies.into_iter().filter(|dependency| dependency.dependency_type.as_deref() == Some("required")) {
-            let key = dependency.project_id.as_deref().or(dependency.version_id.as_deref()).unwrap_or_default();
-            if key.is_empty() || !seen.insert(key.to_owned()) { continue; }
-            let version = if let Some(version_id) = dependency.version_id.as_deref() {
-                http.get(format!("{API}/version/{version_id}")).send()?.error_for_status()?.json::<ProjectVersion>()?
-            } else if let Some(project_id) = dependency.project_id.as_deref() {
-                project_versions(project_id, Some(minecraft), Some(&loader))?
-                    .into_iter().find(|version| !version.files.is_empty())
-                    .with_context(|| format!("Required mod dependency {project_id} has no compatible release"))?
-            } else {
-                continue;
-            };
-            download_mod_version(&version, &mods_directory, &mut seen, 0, minecraft, &loader)
-                .with_context(|| format!("Could not install required mod dependency {key}"))?;
-        }
+        install_required_mod_dependencies(&dependencies, &instance, minecraft, &loader)?;
     }
     let profile = serde_json::json!({
         "name": manifest.name,
