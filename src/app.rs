@@ -167,6 +167,7 @@ pub struct LunarApp {
     skin_editor_profile: String,
     skin_color: Color32,
     skin_rotation: f32,
+    skin_preview_texture: Option<egui::TextureHandle>,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
 }
@@ -270,6 +271,7 @@ impl LunarApp {
             skin_editor_profile: String::new(),
             skin_color: Color32::from_rgb(151, 169, 255),
             skin_rotation: 0.45,
+            skin_preview_texture: None,
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
         };
@@ -1947,13 +1949,23 @@ impl LunarApp {
             Color32::from_rgba_unmultiplied((total[0]/count) as u8, (total[1]/count) as u8, (total[2]/count) as u8, (total[3]/count) as u8)
         };
         let parts = [
-            ((0.0, 2.65, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8)),
-            ((0.0, 1.35, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12)),
-            ((-0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12)),
-            ((0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12)),
-            ((-0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12)),
-            ((0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12)),
+            ((0.0, 2.65, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8), (8, 8, 8, 8)),
+            ((0.0, 1.35, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12), (20, 20, 8, 12)),
+            ((-0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12), (44, 20, 4, 12)),
+            ((0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12), (36, 52, 4, 12)),
+            ((-0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12), (4, 20, 4, 12)),
+            ((0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12), (20, 52, 4, 12)),
         ];
+        let texture_image = egui::ColorImage::from_rgba_unmultiplied(
+            [skin.width() as usize, skin.height() as usize],
+            skin.as_raw(),
+        );
+        if let Some(texture) = self.skin_preview_texture.as_mut() {
+            texture.set(texture_image, egui::TextureOptions::NEAREST);
+        } else {
+            self.skin_preview_texture = Some(ui.ctx().load_texture("lunar-skin-preview", texture_image, egui::TextureOptions::NEAREST));
+        }
+        let skin_texture_id = self.skin_preview_texture.as_ref().map(egui::TextureHandle::id);
         let yaw = self.skin_rotation;
         let (sin, cos) = yaw.sin_cos();
         let project = |point: (f32, f32, f32)| {
@@ -1962,7 +1974,8 @@ impl LunarApp {
             (egui::pos2(rect.center().x + rx * 45.0, rect.center().y - point.1 * 45.0 + rz * 9.0), rz)
         };
         let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
-        for (center, size, base) in parts {
+        let mut textured_faces: Vec<(f32, [egui::Pos2; 4], (u32, u32, u32, u32))> = Vec::new();
+        for (center, size, base, uv_rect) in parts {
             let (cx, cy, cz) = center;
             let (sx, sy, sz) = (size.0/2.0, size.1/2.0, size.2/2.0);
             let vertices = [
@@ -1974,18 +1987,47 @@ impl LunarApp {
                 let projected = face.iter().map(|index| project(vertices[*index])).collect::<Vec<_>>();
                 let depth = projected.iter().map(|point| point.1).sum::<f32>() / 4.0;
                 let factor = [1.0, 0.62, 0.82, 1.16, 0.48][face_index];
-                let color = Color32::from_rgba_unmultiplied(
-                    (base.r() as f32 * factor).clamp(0.0,255.0) as u8,
-                    (base.g() as f32 * factor).clamp(0.0,255.0) as u8,
-                    (base.b() as f32 * factor).clamp(0.0,255.0) as u8,
-                    base.a(),
-                );
-                faces.push((depth, projected.into_iter().map(|point| point.0).collect(), color));
+                if face_index == 0 {
+                    textured_faces.push((depth, [projected[0].0, projected[1].0, projected[2].0, projected[3].0], uv_rect));
+                } else {
+                    let color = Color32::from_rgba_unmultiplied(
+                        (base.r() as f32 * factor).clamp(0.0,255.0) as u8,
+                        (base.g() as f32 * factor).clamp(0.0,255.0) as u8,
+                        (base.b() as f32 * factor).clamp(0.0,255.0) as u8,
+                        base.a(),
+                    );
+                    faces.push((depth, projected.into_iter().map(|point| point.0).collect(), color));
+                }
             }
         }
         faces.sort_by(|a,b| a.0.total_cmp(&b.0));
         for (_, points, color) in faces {
             painter.add(egui::Shape::convex_polygon(points, color, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(5, 8, 16, 190))));
+        }
+        if let Some(texture_id) = skin_texture_id {
+            textured_faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut mesh = egui::Mesh::with_texture(texture_id);
+            for (_, points, (x, y, width, height)) in textured_faces {
+                let sx = (skin.width() / 64).max(1);
+                let sy = (skin.height() / 64).max(1);
+                let u0 = x * sx;
+                let v0 = y * sy;
+                let u1 = (x + width) * sx;
+                let v1 = (y + height) * sy;
+                let uv = [
+                    egui::pos2(u0 as f32 / skin.width() as f32, v1 as f32 / skin.height() as f32),
+                    egui::pos2(u1 as f32 / skin.width() as f32, v1 as f32 / skin.height() as f32),
+                    egui::pos2(u1 as f32 / skin.width() as f32, v0 as f32 / skin.height() as f32),
+                    egui::pos2(u0 as f32 / skin.width() as f32, v0 as f32 / skin.height() as f32),
+                ];
+                let start = mesh.vertices.len() as u32;
+                for index in 0..4 {
+                    mesh.vertices.push(egui::epaint::Vertex { pos: points[index], uv: uv[index], color: Color32::WHITE });
+                }
+                mesh.add_triangle(start, start + 1, start + 2);
+                mesh.add_triangle(start, start + 2, start + 3);
+            }
+            painter.add(egui::Shape::mesh(mesh));
         }
         painter.text(egui::pos2(rect.center().x, rect.bottom()-16.0), egui::Align2::CENTER_CENTER, "DRAG TO ROTATE", FontId::proportional(9.0), Color32::from_gray(145));
     }
