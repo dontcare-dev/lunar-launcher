@@ -712,9 +712,14 @@ impl LunarApp {
         };
         let image = egui::Image::from_bytes(uri, icon.to_vec())
             .fit_to_exact_size(Vec2::splat(18.0));
-        ui.add_sized([178.0, 42.0], egui::Button::image_and_text(image, text).fill(
+        let response = ui.add_sized([178.0, 42.0], egui::Button::image_and_text(image, text).fill(
             if active { Color32::from_rgba_unmultiplied(83, 105, 160, 150) } else { Color32::TRANSPARENT }
-        ).stroke(Stroke::NONE))
+        ).stroke(Stroke::NONE));
+        if active {
+            let marker = egui::Rect::from_min_size(response.rect.left_top() + Vec2::new(1.0, 8.0), Vec2::new(3.0, response.rect.height() - 16.0));
+            ui.painter().rect_filled(marker, egui::CornerRadius::same(2), Color32::from_rgb(174, 190, 255));
+        }
+        response
     }
 
     fn sidebar(&mut self, ctx: &egui::Context) {
@@ -1836,7 +1841,8 @@ impl LunarApp {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.label(RichText::new("ADD DOWNLOAD").strong().size(11.0).color(self.accent));
             ui.horizontal(|ui| {
-                ui.add_sized([ui.available_width() - 116.0, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste an HTTPS download URL"));
+                let url_width = (ui.available_width() - 116.0).max(120.0);
+                ui.add_sized([url_width, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste an HTTPS download URL"));
                 if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Download")).clicked() {
                     match self.downloads.enqueue(self.download_url.trim(), self.game_root.join("downloads")) {
                         Ok(id) => {
