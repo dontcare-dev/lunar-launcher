@@ -1,7 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod app;
-mod diagnostics;
 mod content;
 mod loaders;
 mod runtime;
