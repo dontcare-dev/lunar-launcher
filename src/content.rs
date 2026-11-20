@@ -28,7 +28,7 @@ struct ProjectVersion {
     dependencies: Vec<VersionDependency>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct VersionDependency {
     project_id: Option<String>,
     version_id: Option<String>,
@@ -240,6 +240,7 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         }
     }
     let http = client()?;
+    let mut recovered_dependencies = Vec::<VersionDependency>::new();
     for item in &manifest.files {
         if item.env.as_ref().and_then(|env| env.get("client")).is_some_and(|value| value == "unsupported") { continue; }
         let destination = instance.join(safe_relative(&item.path)?);
@@ -270,6 +271,11 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
             && let Ok(response) = response.error_for_status()
             && let Ok(version) = response.json::<serde_json::Value>()
         {
+            if let Some(dependencies) = version.get("dependencies").cloned()
+                && let Ok(dependencies) = serde_json::from_value::<Vec<VersionDependency>>(dependencies)
+            {
+                recovered_dependencies.extend(dependencies);
+            }
             if let Some(files) = version.get("files").and_then(serde_json::Value::as_array) {
                 for file in files {
                     let Some(url) = file.get("url").and_then(serde_json::Value::as_str) else { continue };
@@ -287,6 +293,30 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         let bytes = downloaded.ok_or_else(|| anyhow!("Could not download or verify modpack file {} after retries and Modrinth hash recovery", item.path))?;
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
         fs::write(destination, bytes)?;
+    }
+    if !recovered_dependencies.is_empty() {
+        let minecraft = manifest.dependencies.get("minecraft").context("Modpack Minecraft version is missing")?;
+        let loader = manifest.dependencies.iter()
+            .find(|(key, _)| key.as_str() != "minecraft")
+            .map(|(key, _)| key.trim_end_matches("-loader").to_owned())
+            .unwrap_or_else(|| "fabric".to_owned());
+        let mods_directory = instance.join("mods");
+        let mut seen = std::collections::HashSet::new();
+        for dependency in recovered_dependencies.into_iter().filter(|dependency| dependency.dependency_type.as_deref() == Some("required")) {
+            let key = dependency.project_id.as_deref().or(dependency.version_id.as_deref()).unwrap_or_default();
+            if key.is_empty() || !seen.insert(key.to_owned()) { continue; }
+            let version = if let Some(version_id) = dependency.version_id.as_deref() {
+                http.get(format!("{API}/version/{version_id}")).send()?.error_for_status()?.json::<ProjectVersion>()?
+            } else if let Some(project_id) = dependency.project_id.as_deref() {
+                project_versions(project_id, Some(minecraft), Some(&loader))?
+                    .into_iter().find(|version| !version.files.is_empty())
+                    .with_context(|| format!("Required mod dependency {project_id} has no compatible release"))?
+            } else {
+                continue;
+            };
+            download_mod_version(&version, &mods_directory, &mut seen, 0, minecraft, &loader)
+                .with_context(|| format!("Could not install required mod dependency {key}"))?;
+        }
     }
     let profile = serde_json::json!({
         "name": manifest.name,
