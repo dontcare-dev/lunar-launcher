@@ -556,9 +556,11 @@ impl LunarApp {
                 self.progress_rx = None;
                 self.install_progress = None;
                 self.content_busy = false;
+                if let Some(id) = self.active_install_task.take() { self.downloads.finish_operation(id, Ok(())); }
                 self.status = "Minecraft installation complete".into();
             }
             Some(Ok(Err(error))) => {
+                if let Some(id) = self.active_install_task.take() { self.downloads.finish_operation(id, Err(error.clone())); }
                 self.status = error;
                 self.install_rx = None;
                 self.progress_rx = None;
@@ -566,6 +568,7 @@ impl LunarApp {
                 self.content_busy = false;
             }
             Some(Err(TryRecvError::Disconnected)) => {
+                if let Some(id) = self.active_install_task.take() { self.downloads.finish_operation(id, Err("Installation worker disconnected".into())); }
                 self.status = "Minecraft installation stopped unexpectedly".into();
                 self.install_rx = None;
                 self.progress_rx = None;
@@ -2527,6 +2530,8 @@ impl eframe::App for LunarApp {
         if let Some(rx) = &self.content_install_rx
             && let Ok(result) = rx.try_recv()
         {
+            let operation_result = result.as_ref().map(|_| ()).map_err(Clone::clone);
+            if let Some(id) = self.active_content_task.take() { self.downloads.finish_operation(id, operation_result); }
             match result {
                 Ok(path) => {
                     self.status = format!("Installed to {path}");
@@ -2542,6 +2547,8 @@ impl eframe::App for LunarApp {
             && let Ok(result) = rx.try_recv()
         {
             self.java_install_rx = None;
+            let operation_result = result.as_ref().map(|_| ()).map_err(Clone::clone);
+            if let Some(id) = self.active_java_task.take() { self.downloads.finish_operation(id, operation_result); }
             match result {
                 Ok(path) => {
                     self.java_status = format!("Managed runtime: {path}");
@@ -2554,6 +2561,8 @@ impl eframe::App for LunarApp {
             && let Ok(result) = rx.try_recv()
         {
             self.modpack_launch_rx = None;
+            let operation_result = result.as_ref().map(|_| ()).map_err(Clone::clone);
+            if let Some(id) = self.active_modpack_task.take() { self.downloads.finish_operation(id, operation_result); }
             match result {
                 Ok(mut installed) => {
                     if let Some(account) = self.microsoft_account.clone() {
