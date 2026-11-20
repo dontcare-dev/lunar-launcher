@@ -1,0 +1,38 @@
+name: Nyx Client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nyx-client/**"
+      - ".github/workflows/nyx-client.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+      - name: Build Nyx Client
+        working-directory: nyx-client
+        run: gradle build --no-daemon
+      - name: Publish installable client build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nyx-client-build-${{ github.run_number }}
+          name: Nyx Client Build #${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          files: nyx-client/build/libs/nyx-client.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
