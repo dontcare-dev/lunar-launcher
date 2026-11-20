@@ -248,6 +248,26 @@ impl DownloadManager {
         }
     }
 
+    pub fn enqueue_routed(&mut self, url: &str, root: PathBuf) -> anyhow::Result<u64> {
+        let parsed = reqwest::Url::parse(url)?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            anyhow::bail!("Only HTTP and HTTPS download links are supported");
+        }
+        let filename = parsed.path_segments().and_then(|mut parts| parts.next_back()).unwrap_or("").to_ascii_lowercase();
+        let directory = if filename.ends_with(".jar") {
+            root.join("mods")
+        } else if filename.ends_with(".mrpack") {
+            root.join("downloads").join("modpacks")
+        } else if filename.ends_with(".zip") && (filename.contains("shader") || filename.contains("complementary") || filename.contains("bsl") || filename.contains(" seus")) {
+            root.join("shaderpacks")
+        } else if filename.ends_with(".zip") && (filename.contains("resource") || filename.contains("texture") || filename.contains("faithful") || filename.contains("vanilla")) {
+            root.join("resourcepacks")
+        } else {
+            root.join("downloads").join("unclassified")
+        };
+        self.enqueue(url, directory)
+    }
+
     pub fn retry(&mut self, id: u64) -> anyhow::Result<u64> {
         let task = self.tasks.iter().find(|task| task.id == id).cloned()
             .ok_or_else(|| anyhow::anyhow!("Download task was not found"))?;
@@ -256,6 +276,22 @@ impl DownloadManager {
         }
         let directory = task.destination.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         self.enqueue(&task.url, directory)
+    }
+
+    pub fn download_again(&mut self, id: u64) -> anyhow::Result<u64> {
+        let task = self.tasks.iter().find(|task| task.id == id).cloned()
+            .ok_or_else(|| anyhow::anyhow!("Download task was not found"))?;
+        if task.url.starts_with("lunar://") {
+            anyhow::bail!("Internal Lunar tasks cannot be downloaded again");
+        }
+        let directory = task.destination.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        self.enqueue(&task.url, directory)
+    }
+
+    pub fn forget(&mut self, id: u64) {
+        self.tasks.retain(|task| task.id != id);
+        self.controls.remove(&id);
+        self.persist();
     }
 
     pub fn poll(&mut self) {
