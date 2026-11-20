@@ -17,6 +17,16 @@ pub struct Instance {
     pub play_count: u64,
     #[serde(default)]
     pub loader: Option<String>,
+    #[serde(default = "default_instance_performance")]
+    pub performance_mode: String,
+    #[serde(default)]
+    pub jvm_arguments: String,
+    #[serde(default = "default_backup_on_exit")]
+    pub backup_on_exit: bool,
+}
+
+fn default_instance_performance() -> String { "Performance".into() }
+fn default_backup_on_exit() -> bool { true }
 }
 
 fn now() -> u64 {
@@ -66,7 +76,7 @@ pub fn create_instance(root: &Path, name: &str, minecraft: &str) -> Result<Insta
     while root.join("instances").join(&id).exists() { id = format!("{base}-{suffix}"); suffix += 1; }
     let path = root.join("instances").join(&id);
     for folder in ["mods", "resourcepacks", "shaderpacks", "screenshots", "saves", "logs", "crash-reports", "config"] { fs::create_dir_all(path.join(folder))?; }
-    let item = Instance { id, name: clean.to_owned(), minecraft: minecraft.to_owned(), memory_mb: 4096, java_major: None, created_at: now(), last_played: None, play_count: 0, loader: None };
+    let item = Instance { id, name: clean.to_owned(), minecraft: minecraft.to_owned(), memory_mb: 4096, java_major: None, created_at: now(), last_played: None, play_count: 0, loader: None, performance_mode: default_instance_performance(), jvm_arguments: String::new(), backup_on_exit: default_backup_on_exit() };
     save_instance(root, &item)?;
     Ok(item)
 }
@@ -478,7 +488,7 @@ mod tests {
     #[test]
     fn instance_manifest_round_trips() {
         let root = std::env::temp_dir().join(format!("lunar-workspace-{}", std::process::id()));
-        let item = Instance { id: "test-instance".into(), name: "Test Instance".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: None };
+        let item = Instance { id: "test-instance".into(), name: "Test Instance".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: None, performance_mode: default_instance_performance(), jvm_arguments: String::new(), backup_on_exit: default_backup_on_exit() };
         save_instance(&root, &item).unwrap();
         assert_eq!(list_instances(&root).unwrap()[0].name, item.name);
         let _ = fs::remove_dir_all(root);
@@ -530,7 +540,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let instance = root.join("instances").join("source");
         fs::create_dir_all(instance.join("mods")).unwrap();
-        let item = Instance { id: "source".into(), name: "Source".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: Some("fabric".into()) };
+        let item = Instance { id: "source".into(), name: "Source".into(), minecraft: "1.21.1".into(), memory_mb: 4096, java_major: None, created_at: 1, last_played: None, play_count: 0, loader: Some("fabric".into()), performance_mode: default_instance_performance(), jvm_arguments: String::new(), backup_on_exit: default_backup_on_exit() };
         save_instance(&root, &item).unwrap();
         fs::write(instance.join("mods").join("example.jar"), b"mod-data").unwrap();
         let archive = root.join("source.lunarpack");
