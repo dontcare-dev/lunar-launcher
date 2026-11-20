@@ -88,21 +88,6 @@ type BackgroundLoadResult = Result<BackgroundFrames, String>;
 type SkinApplyResult = Result<(String, image::RgbaImage, PathBuf), String>;
 type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 type SkinTexturedFace = (f32, [egui::Pos2; 4], (u32, u32, u32, u32));
-fn skin_uv_regions(part: &str, outer: bool) -> &'static [(u32, u32, u32, u32)] {
-    const ALL: &[(u32, u32, u32, u32)] = &[(0, 0, 64, 64)];
-    const HEAD: &[(u32, u32, u32, u32)] = &[(0, 0, 32, 16)];
-    const BODY: &[(u32, u32, u32, u32)] = &[(16, 16, 24, 16)];
-    const ARMS: &[(u32, u32, u32, u32)] = &[(40, 16, 16, 16), (32, 48, 16, 16)];
-    const LEGS: &[(u32, u32, u32, u32)] = &[(0, 16, 16, 16), (16, 48, 16, 16)];
-    const HEAD_OUTER: &[(u32, u32, u32, u32)] = &[(32, 0, 32, 16)];
-    const BODY_OUTER: &[(u32, u32, u32, u32)] = &[(16, 32, 24, 16)];
-    const ARMS_OUTER: &[(u32, u32, u32, u32)] = &[(40, 32, 16, 16), (48, 48, 16, 16)];
-    const LEGS_OUTER: &[(u32, u32, u32, u32)] = &[(0, 32, 16, 16), (0, 48, 16, 16)];
-    if !outer { match part { "Head" => HEAD, "Body" => BODY, "Arms" => ARMS, "Legs" => LEGS, _ => ALL } }
-    else { match part { "Head" => HEAD_OUTER, "Body" => BODY_OUTER, "Arms" => ARMS_OUTER, "Legs" => LEGS_OUTER, _ => ALL } }
-}
-
-
 enum MicrosoftLoginEvent {
     DeviceCode { code: String, url: String },
     Complete(crust_core::authenticator::Account),
@@ -190,11 +175,8 @@ pub struct LunarApp {
     microsoft_code: Option<(String, String)>,
     skin_editor: Option<image::RgbaImage>,
     skin_editor_profile: String,
-    skin_color: Color32,
     skin_rotation: f32,
     skin_preview_texture: Option<egui::TextureHandle>,
-    skin_overlay_layer: bool,
-    skin_selected_part: String,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
     active_install_task: Option<u64>,
@@ -315,11 +297,8 @@ impl LunarApp {
             microsoft_code: None,
             skin_editor: None,
             skin_editor_profile: String::new(),
-            skin_color: Color32::from_rgb(151, 169, 255),
             skin_rotation: 0.45,
             skin_preview_texture: None,
-            skin_overlay_layer: false,
-            skin_selected_part: "All".into(),
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
             active_install_task: None,
