@@ -1918,6 +1918,13 @@ impl LunarApp {
                     } else if matches!(&task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
                         ui.add(egui::ProgressBar::new(0.0).text(format!("{:.1} MB downloaded", task.downloaded as f64 / 1_048_576.0)));
                     }
+                    egui::CollapsingHeader::new(format!("Activity log · {} entries", task.logs.len()))
+                        .id_salt(("download-log", task.id))
+                        .show(ui, |ui| {
+                            for entry in task.logs.iter().rev().take(8).rev() {
+                                ui.label(RichText::new(entry).size(10.0).color(Color32::GRAY));
+                            }
+                        });
                 });
             }
         });
