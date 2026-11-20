@@ -23,7 +23,7 @@ fn latest_file(directories: &[PathBuf]) -> Option<PathBuf> {
             }
         }
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|item| std::cmp::Reverse(item.0));
     files.into_iter().next().map(|(_, path)| path)
 }
 
