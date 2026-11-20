@@ -19,7 +19,7 @@ egui_extras = { version = "0.31", features = ["svg"] }
 image = { version = "0.25", default-features = false, features = ["gif", "png", "jpeg", "webp"] }
 sysinfo = "0.33"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
-keyring = "3.6"
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [build-dependencies]
 winres = "0.1"
