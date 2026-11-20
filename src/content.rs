@@ -206,6 +206,40 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
     Ok(destination.display().to_string())
 }
 
+pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Result<String> {
+    if minecraft != "1.21.1" || loader != "fabric" {
+        bail!("Nyx Client currently supports Minecraft 1.21.1 with Fabric only");
+    }
+    let http = client()?;
+    let releases = http.get("https://api.github.com/repos/dontcare-dev/lunar-launcher/releases?per_page=20")
+        .send()?.error_for_status()?.json::<Vec<serde_json::Value>>()?;
+    let asset_url = releases.iter()
+        .filter(|release| release.get("tag_name").and_then(serde_json::Value::as_str).is_some_and(|tag| tag.starts_with("nyx-client-build-")))
+        .find_map(|release| release.get("assets").and_then(serde_json::Value::as_array).and_then(|assets| {
+            assets.iter().find(|asset| asset.get("name").and_then(serde_json::Value::as_str) == Some("nyx-client.jar"))
+                .and_then(|asset| asset.get("browser_download_url"))
+                .and_then(serde_json::Value::as_str)
+        }))
+        .context("No published Nyx Client build is available yet")?;
+    let bytes = http.get(asset_url).send()?.error_for_status()?.bytes()?;
+    if bytes.is_empty() { bail!("The Nyx Client download was empty"); }
+    let mut archive = ZipArchive::new(Cursor::new(bytes.as_ref())).context("The Nyx Client download is not a valid JAR")?;
+    if archive.by_name("fabric.mod.json").is_err() {
+        bail!("The downloaded file is not a valid Fabric client mod");
+    }
+    drop(archive);
+    let directory = instance.join("mods");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join("nyx-client.jar");
+    let temporary = directory.join("nyx-client.jar.lunar-download");
+    fs::write(&temporary, &bytes)?;
+    if let Err(error) = fs::rename(&temporary, &destination) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
+    }
+    Ok(destination.display().to_string())
+}
+
 pub fn install_resource_pack(project_id: &str, root: &Path, _minecraft: &str) -> Result<String> {
     save_project_file(project_id, root, "resourcepacks", "resource pack", None, None)
 }
