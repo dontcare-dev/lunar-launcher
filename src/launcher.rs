@@ -535,7 +535,7 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
         ],
         "Performance" => &[
             ("graphics", "fast"),
-            ("renderDistance", "4"),
+            ("renderDistance", "3"),
             ("simulationDistance", "3"),
             ("maxFps", "120"),
             ("enableVsync", "false"),
@@ -573,8 +573,6 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
     for (key, value) in settings {
         options.insert((*key).to_owned(), (*value).to_owned());
     }
-    options.insert("renderDistance".into(), "3".into());
-    options.insert("simulationDistance".into(), "3".into());
     let content = options.into_iter()
         .map(|(key, value)| format!("{key}:{value}"))
         .collect::<Vec<_>>()
