@@ -586,14 +586,6 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str) -> Result<Child> {
-    launch_with_java(installed, username, uuid, memory_mb, performance_mode, None)
-}
-
-pub fn launch_with_java(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, preferred_java: Option<u32>) -> Result<Child> {
-    launch_with_identity(installed, username, uuid, memory_mb, performance_mode, None, preferred_java, "")
-}
-
 pub fn launch_with_account(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str) -> Result<Child> {
     launch_with_account_settings(installed, account, memory_mb, performance_mode, None, "")
 }
