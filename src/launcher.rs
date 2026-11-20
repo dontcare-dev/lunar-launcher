@@ -591,14 +591,18 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
 }
 
 pub fn launch_with_java(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, preferred_java: Option<u32>) -> Result<Child> {
-    launch_with_identity(installed, username, uuid, memory_mb, performance_mode, None, preferred_java)
+    launch_with_identity(installed, username, uuid, memory_mb, performance_mode, None, preferred_java, "")
 }
 
 pub fn launch_with_account(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str) -> Result<Child> {
-    launch_with_identity(installed, &account.name, &account.uuid, memory_mb, performance_mode, Some(account), None)
+    launch_with_account_settings(installed, account, memory_mb, performance_mode, None, "")
 }
 
-fn launch_with_identity(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, account: Option<&crust_core::authenticator::Account>, preferred_java: Option<u32>) -> Result<Child> {
+pub fn launch_with_account_settings(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str, preferred_java: Option<u32>, custom_jvm_arguments: &str) -> Result<Child> {
+    launch_with_identity(installed, &account.name, &account.uuid, memory_mb, performance_mode, Some(account), preferred_java, custom_jvm_arguments)
+}
+
+fn launch_with_identity(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, account: Option<&crust_core::authenticator::Account>, preferred_java: Option<u32>, custom_jvm_arguments: &str) -> Result<Child> {
     let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
     let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let minimum_major = installed.metadata.pointer("/javaVersion/majorVersion").and_then(Value::as_u64).unwrap_or(8) as u32;
@@ -665,6 +669,7 @@ fn launch_with_identity(installed: &InstalledVersion, username: &str, uuid: &str
         .arg(format!("-Xms{}M", (memory_mb / 2).max(512)))
         .arg(format!("-Xmx{}M", memory_mb.clamp(1024, 8192)))
         .args(jvm)
+        .args(shlex::split(custom_jvm_arguments).unwrap_or_default())
         .args([
             "-XX:+UseG1GC",
             "-XX:+ParallelRefProcEnabled",
