@@ -1854,7 +1854,7 @@ impl LunarApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("DOWNLOAD HISTORY · {}", tasks.len())).strong().color(self.accent));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add_enabled(tasks.iter().any(|task| matches!(task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Failed(_) | crate::downloads::DownloadState::Cancelled)), egui::Button::new("Clear finished")).clicked() {
+                if ui.add_enabled(tasks.iter().any(|task| matches!(&task.state, crate::downloads::DownloadState::Completed | crate::downloads::DownloadState::Failed(_) | crate::downloads::DownloadState::Cancelled)), egui::Button::new("Clear finished")).clicked() {
                     self.downloads.clear_finished();
                 }
             });
@@ -1872,7 +1872,7 @@ impl LunarApp {
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&task.filename).strong());
                             ui.label(RichText::new(task.destination.display().to_string()).size(9.0).color(Color32::GRAY));
-                            ui.label(RichText::new(task.state.label()).size(10.0).color(match task.state {
+                            ui.label(RichText::new(task.state.label()).size(10.0).color(match &task.state {
                                 crate::downloads::DownloadState::Completed => Color32::from_rgb(112, 215, 157),
                                 crate::downloads::DownloadState::Failed(_) => Color32::from_rgb(230, 130, 130),
                                 crate::downloads::DownloadState::Cancelled => Color32::GRAY,
@@ -1880,7 +1880,7 @@ impl LunarApp {
                             }));
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if matches!(task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
+                            if matches!(&task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
                                 if ui.small_button("Cancel").clicked() { self.downloads.cancel(task.id); }
                             }
                             match &task.state {
@@ -1905,7 +1905,7 @@ impl LunarApp {
                     if let Some(total) = task.total {
                         let fraction = if total == 0 { 0.0 } else { (task.downloaded as f32 / total as f32).clamp(0.0, 1.0) };
                         ui.add(egui::ProgressBar::new(fraction).text(format!("{:.1} / {:.1} MB", task.downloaded as f64 / 1_048_576.0, total as f64 / 1_048_576.0)));
-                    } else if matches!(task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
+                    } else if matches!(&task.state, crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
                         ui.add(egui::ProgressBar::new(0.0).text(format!("{:.1} MB downloaded", task.downloaded as f64 / 1_048_576.0)));
                     }
                 });
