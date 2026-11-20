@@ -199,6 +199,7 @@ pub struct LunarApp {
     skin_catalogue_results: Vec<crate::skins::Skin>,
     skin_catalogue_rx: Option<Receiver<Result<Vec<crate::skins::Skin>, String>>>,
     skin_catalogue_busy: bool,
+    skin_catalogue_textures: std::collections::BTreeMap<String, egui::TextureHandle>,
 }
 
 impl LunarApp {
@@ -315,6 +316,7 @@ impl LunarApp {
             skin_catalogue_results: Vec::new(),
             skin_catalogue_rx: None,
             skin_catalogue_busy: false,
+            skin_catalogue_textures: std::collections::BTreeMap::new(),
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -1979,7 +1981,7 @@ impl LunarApp {
                                     }
                                 }
                                 crate::downloads::DownloadState::Completed => {
-                                    if ui.small_button("Download again").clicked() {
+                                    if ui.small_button("Reinstall / Update").clicked() {
                                         match self.downloads.download_again(task.id) {
                                             Ok(new_id) => self.status = format!("Download #{new_id} queued again"),
                                             Err(error) => self.status = error.to_string(),
@@ -2153,25 +2155,34 @@ impl LunarApp {
             ui.label(RichText::new("Create or select an offline profile before editing a skin.").color(Color32::LIGHT_RED));
             return;
         }
-        if let Some(receiver) = &self.skin_catalogue_rx {
-            match receiver.try_recv() {
-                Ok(Ok(results)) => {
-                    self.skin_catalogue_results = results;
-                    self.skin_catalogue_busy = false;
-                    self.skin_catalogue_rx = None;
-                    self.status = format!("Loaded {} community skins", self.skin_catalogue_results.len());
+        let skin_search_result = self.skin_catalogue_rx.as_ref().map(Receiver::try_recv);
+        match skin_search_result {
+            Some(Ok(Ok(results))) => {
+                self.skin_catalogue_textures.clear();
+                for skin in &results {
+                    if let Some((width, height, rgba)) = &skin.preview_rgba {
+                        let image = egui::ColorImage::from_rgba_unmultiplied([*width, *height], rgba);
+                        self.skin_catalogue_textures.insert(
+                            skin.id.clone(),
+                            ui.ctx().load_texture(format!("lunar-skin-catalogue-{}", skin.id), image, egui::TextureOptions::NEAREST),
+                        );
+                    }
                 }
-                Ok(Err(error)) => {
-                    self.skin_catalogue_busy = false;
-                    self.skin_catalogue_rx = None;
-                    self.status = format!("Skin search failed: {error}");
-                }
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {
-                    self.skin_catalogue_busy = false;
-                    self.skin_catalogue_rx = None;
-                    self.status = "Skin search stopped unexpectedly".into();
-                }
+                self.skin_catalogue_results = results;
+                self.skin_catalogue_busy = false;
+                self.skin_catalogue_rx = None;
+                self.status = format!("Loaded {} community skins", self.skin_catalogue_results.len());
+            }
+            Some(Ok(Err(error))) => {
+                self.skin_catalogue_busy = false;
+                self.skin_catalogue_rx = None;
+                self.status = format!("Skin search failed: {error}");
+            }
+            Some(Err(TryRecvError::Empty)) | None => {}
+            Some(Err(TryRecvError::Disconnected)) => {
+                self.skin_catalogue_busy = false;
+                self.skin_catalogue_rx = None;
+                self.status = "Skin search stopped unexpectedly".into();
             }
         }
         ui.group(|ui| {
@@ -2195,6 +2206,9 @@ impl LunarApp {
             egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                 for skin in self.skin_catalogue_results.clone() {
                     ui.horizontal(|ui| {
+                        if let Some(texture) = self.skin_catalogue_textures.get(&skin.id) {
+                            ui.add(egui::Image::new((texture.id(), Vec2::new(48.0, 84.0))));
+                        }
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&skin.name).strong());
                             ui.label(RichText::new(format!("By {} · {} arms", skin.creator, skin.arms)).size(10.0).color(Color32::GRAY));
