@@ -80,7 +80,7 @@ fn safe_relative(value: &str) -> Result<PathBuf> {
 }
 
 
-pub fn mark_project_installed(root: &Path, kind: &str, project_id: &str) -> Result<()> {
+pub fn mark_project_installed(root: &Path, kind: &str, project_id: &str, installed_paths: &str) -> Result<()> {
     let path = root.join(".lunar-installed-content.json");
     let mut registry: serde_json::Value = if path.exists() {
         serde_json::from_slice(&fs::read(&path)?)?
@@ -88,11 +88,10 @@ pub fn mark_project_installed(root: &Path, kind: &str, project_id: &str) -> Resu
         serde_json::json!({})
     };
     let entries = registry.as_object_mut().context("Installed content registry is invalid")?;
-    let ids = entries.entry(kind.to_owned()).or_insert_with(|| serde_json::json!([]));
-    let ids = ids.as_array_mut().context("Installed content registry entry is invalid")?;
-    if !ids.iter().any(|value| value.as_str() == Some(project_id)) {
-        ids.push(serde_json::json!(project_id));
-    }
+    let projects = entries.entry(kind.to_owned()).or_insert_with(|| serde_json::json!({}));
+    let projects = projects.as_object_mut().context("Installed content registry entry is invalid")?;
+    let paths = installed_paths.lines().filter(|value| !value.trim().is_empty()).collect::<Vec<_>>();
+    projects.insert(project_id.to_owned(), serde_json::json!(paths));
     fs::write(path, serde_json::to_vec_pretty(&registry)?)?;
     Ok(())
 }
@@ -101,8 +100,11 @@ pub fn project_is_installed(root: &Path, kind: &str, project_id: &str) -> bool {
     let path = root.join(".lunar-installed-content.json");
     fs::read(path).ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .and_then(|registry| registry.get(kind).and_then(serde_json::Value::as_array).cloned())
-        .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(project_id)))
+        .and_then(|registry| registry.get(kind).and_then(serde_json::Value::as_object).cloned())
+        .and_then(|projects| projects.get(project_id).and_then(serde_json::Value::as_array).cloned())
+        .is_some_and(|paths| !paths.is_empty() && paths.iter().all(|value| {
+            value.as_str().is_some_and(|path| Path::new(path).exists())
+        }))
 }
 
 pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
