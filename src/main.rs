@@ -12,6 +12,7 @@ mod minecraft;
 mod launcher;
 mod profiles;
 mod stats;
+mod skins;
 
 fn main() -> eframe::Result<()> {
     let icon = eframe::icon_data::from_png_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/moon.png")))
