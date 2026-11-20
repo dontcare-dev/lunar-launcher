@@ -1,3 +1,4 @@
+use anyhow::Context;
 use crate::{launcher::{self, InstalledVersion, InstallProgress}, minecraft::{self, VersionEntry, VersionManifest}, profiles::ProfileStore};
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use image::{AnimationDecoder, codecs::gif::GifDecoder, imageops::FilterType};
@@ -700,7 +701,7 @@ impl LunarApp {
         ui.label(RichText::new(subtitle).color(Color32::from_rgb(145, 153, 171)).size(13.0));
         ui.add_space(9.0);
         let rect = ui.available_rect_before_wrap();
-        ui.painter().line_segment([rect.left_top(), egui::pos2(rect.left() + 74.0, rect.top())], Stroke::new(2.0, Color32::from_rgba_unmultiplied(151, 169, 255, 170)));
+        ui.painter().line_segment([rect.left_top(), egui::pos2(rect.left() + 74.0, rect.top())], Stroke::new(2.0_f32, Color32::from_rgba_unmultiplied(151, 169, 255, 170)));
         ui.add_space(11.0);
     }
 
@@ -1073,7 +1074,6 @@ impl LunarApp {
                     Ok(MicrosoftLoginEvent::DeviceCode { code, url }) => {
                         self.microsoft_code = Some((code, url));
                         self.status = "Enter the displayed code on Microsoft's sign-in page".into();
-                        keep_polling = true;
                     }
                     Ok(MicrosoftLoginEvent::Complete(account)) => {
                         let account_name = account.name.clone();
@@ -1985,7 +1985,7 @@ impl LunarApp {
         }
         faces.sort_by(|a,b| a.0.total_cmp(&b.0));
         for (_, points, color) in faces {
-            painter.add(egui::Shape::convex_polygon(points, color, Stroke::new(1.0, Color32::from_rgba_unmultiplied(5, 8, 16, 190))));
+            painter.add(egui::Shape::convex_polygon(points, color, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(5, 8, 16, 190))));
         }
         painter.text(egui::pos2(rect.center().x, rect.bottom()-16.0), egui::Align2::CENTER_CENTER, "DRAG TO ROTATE", FontId::proportional(9.0), Color32::from_gray(145));
     }
