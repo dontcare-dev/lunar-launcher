@@ -1513,6 +1513,27 @@ impl LunarApp {
                                 Err(error) => self.status = error.to_string(),
                             }
                         }
+                        if ui.add_enabled(!self.content_busy, egui::Button::new("Resolve dependencies")).clicked() {
+                            let instance = pack.instance.clone();
+                            let minecraft = pack.minecraft.clone();
+                            let loader = pack.loaders.keys().find(|key| key.as_str() != "minecraft")
+                                .map(|key| key.trim_end_matches("-loader").to_owned())
+                                .unwrap_or_else(|| "fabric".to_owned());
+                            let (tx, rx) = mpsc::channel();
+                            self.content_install_rx = Some(rx);
+                            self.content_busy = true;
+                            self.status = format!("Checking required dependencies for {}…", pack.name);
+                            std::thread::spawn(move || {
+                                let result = crate::content::resolve_instance_dependencies(&instance, &minecraft, &loader)
+                                    .map(|installed| if installed.is_empty() {
+                                        "Dependency check complete: no missing required dependencies found".to_owned()
+                                    } else {
+                                        format!("Resolved {} required dependency file(s)", installed.len())
+                                    })
+                                    .map_err(|error| format!("{error:#}"));
+                                let _ = tx.send(result);
+                            });
+                        }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
                             if self.microsoft_account.is_some() {
                                 let root = self.game_root.clone();
@@ -2510,7 +2531,7 @@ impl eframe::App for LunarApp {
                         }
                     });
             });
-        if self.content_install_rx.is_some() || self.install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() || self.install_progress.is_some() {
+        if self.content_install_rx.is_some() || self.install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() || self.install_progress.is_some() || self.downloads.has_active() {
             egui::Area::new(egui::Id::new("lunar_download_toast"))
                 .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-22.0, -62.0))
                 .order(egui::Order::Foreground)
