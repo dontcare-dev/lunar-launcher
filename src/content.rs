@@ -448,6 +448,72 @@ pub fn resolve_instance_dependencies(instance: &Path, minecraft: &str, loader: &
         .context("Lunar found required dependencies but could not resolve all of them")
 }
 
+pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: &str) -> Result<Vec<String>> {
+    let mods_directory = instance.join("mods");
+    if !mods_directory.exists() { return Ok(vec!["No mods folder exists in this instance".into()]); }
+    let mut issues = Vec::new();
+    let mut scanned = 0usize;
+    for entry in fs::read_dir(&mods_directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() { continue; }
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()).is_none_or(|value| !value.eq_ignore_ascii_case("jar")) { continue; }
+        scanned += 1;
+        let bytes = fs::read(&path)?;
+        let mut archive = match ZipArchive::new(Cursor::new(bytes)) {
+            Ok(archive) => archive,
+            Err(_) => {
+                issues.push(format!("{}: file is not a readable JAR archive", path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown mod")));
+                continue;
+            }
+        };
+        let fabric = archive.by_name("fabric.mod.json").ok().and_then(|mut file| {
+            let mut text = String::new();
+            file.read_to_string(&mut text).ok()?;
+            serde_json::from_str::<serde_json::Value>(&text).ok()
+        });
+        let quilt = archive.by_name("quilt.mod.json").ok().and_then(|mut file| {
+            let mut text = String::new();
+            file.read_to_string(&mut text).ok()?;
+            serde_json::from_str::<serde_json::Value>(&text).ok()
+        });
+        let forge = archive.file_names().any(|name| name.eq_ignore_ascii_case("META-INF/mods.toml"));
+        let neoforge = archive.file_names().any(|name| name.eq_ignore_ascii_case("META-INF/neoforge.mods.toml"));
+        let name = fabric.as_ref().and_then(|value| value.get("name")).and_then(serde_json::Value::as_str)
+            .or_else(|| fabric.as_ref().and_then(|value| value.get("id")).and_then(serde_json::Value::as_str))
+            .or_else(|| quilt.as_ref().and_then(|value| value.get("quilt_loader")).and_then(|value| value.get("id")).and_then(serde_json::Value::as_str))
+            .unwrap_or_else(|| path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown mod"));
+        let selected = loader.to_ascii_lowercase();
+        if fabric.is_some() && selected != "fabric" {
+            issues.push(format!("{name}: Fabric mod metadata found, but this instance uses {loader}"));
+        }
+        if quilt.is_some() && selected != "quilt" {
+            issues.push(format!("{name}: Quilt mod metadata found, but this instance uses {loader}"));
+        }
+        if forge && selected != "forge" {
+            issues.push(format!("{name}: Forge mod metadata found, but this instance uses {loader}"));
+        }
+        if neoforge && selected != "neoforge" {
+            issues.push(format!("{name}: NeoForge mod metadata found, but this instance uses {loader}"));
+        }
+        if let Some(dependencies) = fabric.as_ref().and_then(|value| value.get("depends")).and_then(serde_json::Value::as_object)
+            && let Some(required) = dependencies.get("minecraft")
+        {
+            let constraint = required.as_str().map(str::to_owned).unwrap_or_else(|| required.to_string());
+            if !constraint.is_empty() && constraint != "*" && !constraint.contains(minecraft) {
+                issues.push(format!("{name}: declares Minecraft constraint {constraint}; selected version is {minecraft} (review required)"));
+            }
+        }
+    }
+    if scanned == 0 { return Ok(vec!["No JAR mods were found to inspect".into()]); }
+    if issues.is_empty() {
+        issues.push(format!("Scanned {scanned} JAR files. No obvious loader or Minecraft-version conflicts were found."));
+    } else {
+        issues.insert(0, format!("Scanned {scanned} JAR files for metadata conflicts:"));
+    }
+    Ok(issues)
+}
+
 pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let http = client()?;
     let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
