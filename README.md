@@ -1,6 +1,6 @@
 # Lunar Launcher
 
-Lunar Launcher is a native Rust desktop launcher for Minecraft Java Edition, built around local offline profiles and a fast, animated interface.
+Lunar Launcher is a native Rust desktop launcher for Minecraft Java Edition, built around local profiles and a fast, animated interface.
 
 ## Features
 
