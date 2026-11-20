@@ -1543,6 +1543,23 @@ impl LunarApp {
                                 let _ = tx.send(result);
                             });
                         }
+                        if ui.add_enabled(!self.content_busy, egui::Button::new("Scan compatibility")).clicked() {
+                            let instance = pack.instance.clone();
+                            let minecraft = pack.minecraft.clone();
+                            let loader = pack.loaders.keys().find(|key| key.as_str() != "minecraft")
+                                .map(|key| key.trim_end_matches("-loader").to_owned())
+                                .unwrap_or_else(|| "fabric".to_owned());
+                            let (tx, rx) = mpsc::channel();
+                            self.content_install_rx = Some(rx);
+                            self.content_busy = true;
+                            self.status = format!("Inspecting installed mod metadata for {}…", pack.name);
+                            std::thread::spawn(move || {
+                                let result = crate::content::analyze_instance_compatibility(&instance, &minecraft, &loader)
+                                    .map(|issues| issues.join("\\n"))
+                                    .map_err(|error| format!("{error:#}"));
+                                let _ = tx.send(result);
+                            });
+                        }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
                             if self.microsoft_account.is_some() {
                                 let root = self.game_root.clone();
