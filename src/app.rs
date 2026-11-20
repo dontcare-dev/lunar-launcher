@@ -1555,7 +1555,7 @@ impl LunarApp {
                             self.status = format!("Inspecting installed mod metadata for {}…", pack.name);
                             std::thread::spawn(move || {
                                 let result = crate::content::analyze_instance_compatibility(&instance, &minecraft, &loader)
-                                    .map(|issues| issues.join("\\n"))
+                                    .map(|issues| issues.join("\n"))
                                     .map_err(|error| format!("{error:#}"));
                                 let _ = tx.send(result);
                             });
