@@ -275,10 +275,9 @@ fn discover_modpack_dependencies(files: &[PackFile]) -> Result<Vec<VersionDepend
                     && let Ok(version) = response.json::<serde_json::Value>()
                     && let Some(values) = version.get("dependencies").cloned()
                     && let Ok(mut found) = serde_json::from_value::<Vec<VersionDependency>>(values)
+                    && let Ok(mut dependencies) = dependencies.lock()
                 {
-                    if let Ok(mut dependencies) = dependencies.lock() {
-                        dependencies.append(&mut found);
-                    }
+                    dependencies.append(&mut found);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(800));
             });
