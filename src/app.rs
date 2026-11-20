@@ -86,6 +86,8 @@ type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 enum MicrosoftLoginEvent {
     DeviceCode { code: String, url: String },
     Complete(crust_core::authenticator::Account),
+    Restored(crust_core::authenticator::Account),
+    RestoreFailed(String),
     Failed(String),
 }
 
@@ -250,9 +252,30 @@ impl LunarApp {
             game_cpu_history: Vec::with_capacity(120),
             game_memory_history: Vec::with_capacity(120),
             microsoft_rx: None,
-            microsoft_account: None,
+            microsoft_account: Self::load_microsoft_account(),
             microsoft_code: None,
         };
+        if let Some(saved_account) = app.microsoft_account.clone() {
+            let (tx, rx) = mpsc::channel();
+            app.microsoft_rx = Some(rx);
+            std::thread::spawn(move || {
+                let result = (|| -> anyhow::Result<crust_core::authenticator::Account> {
+                    let runtime = tokio::runtime::Builder::new_multi_thread()
+                        .enable_time()
+                        .build()?;
+                    runtime.block_on(async {
+                        let auth = crust_core::authenticator::Authenticator::new()
+                            .map_err(|error| anyhow::anyhow!("{error}"))?;
+                        auth.refresh(&saved_account).await
+                            .map_err(|error| anyhow::anyhow!("{error}"))
+                    })
+                })();
+                match result {
+                    Ok(account) => { let _ = tx.send(MicrosoftLoginEvent::Restored(account)); }
+                    Err(error) => { let _ = tx.send(MicrosoftLoginEvent::RestoreFailed(format!("{error:#}"))); }
+                }
+            });
+        }
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
         app.content_search_rx = Some(content_rx);
@@ -925,6 +948,32 @@ impl LunarApp {
         }
     }
 
+    fn microsoft_account_entry() -> anyhow::Result<keyring::Entry> {
+        keyring::Entry::new("Lunar Launcher", "microsoft-account")
+            .map_err(|error| anyhow::anyhow!("Could not access the system credential store: {error}"))
+    }
+
+    fn load_microsoft_account() -> Option<crust_core::authenticator::Account> {
+        Self::microsoft_account_entry().ok()?
+            .get_password().ok()
+            .and_then(|value| serde_json::from_str(&value).ok())
+    }
+
+    fn save_microsoft_account(account: &crust_core::authenticator::Account) -> anyhow::Result<()> {
+        let serialized = serde_json::to_string(account)?;
+        Self::microsoft_account_entry()?.set_password(&serialized)
+            .map_err(|error| anyhow::anyhow!("Could not save Microsoft sign-in to the system credential store: {error}"))
+    }
+
+    fn delete_microsoft_account() -> anyhow::Result<()> {
+        let entry = Self::microsoft_account_entry()?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(anyhow::anyhow!("Could not remove saved Microsoft sign-in: {error}")),
+        }
+    }
+
     fn start_microsoft_login(&mut self) {
         if self.microsoft_rx.is_some() {
             return;
@@ -972,9 +1021,28 @@ impl LunarApp {
                         keep_polling = true;
                     }
                     Ok(MicrosoftLoginEvent::Complete(account)) => {
-                        self.status = format!("Microsoft account connected: {}", account.name);
-                        self.microsoft_account = Some(account);
+                        let account_name = account.name.clone();
+                        self.microsoft_account = Some(account.clone());
+                        self.status = match Self::save_microsoft_account(&account) {
+                            Ok(()) => format!("Microsoft account connected and securely saved: {account_name}"),
+                            Err(error) => format!("Microsoft account connected for this session, but could not be saved: {error}"),
+                        };
                         self.microsoft_code = None;
+                        self.microsoft_rx = None;
+                        return;
+                    }
+                    Ok(MicrosoftLoginEvent::Restored(account)) => {
+                        let account_name = account.name.clone();
+                        self.microsoft_account = Some(account.clone());
+                        self.status = match Self::save_microsoft_account(&account) {
+                            Ok(()) => format!("Saved Microsoft account restored: {account_name}"),
+                            Err(error) => format!("Microsoft account restored, but token refresh could not be saved: {error}"),
+                        };
+                        self.microsoft_rx = None;
+                        return;
+                    }
+                    Ok(MicrosoftLoginEvent::RestoreFailed(error)) => {
+                        self.status = format!("Saved Microsoft session could not refresh: {error}");
                         self.microsoft_rx = None;
                         return;
                     }
@@ -1014,7 +1082,12 @@ impl LunarApp {
                     });
                     if ui.button("Sign out").clicked() {
                         self.microsoft_account = None;
-                        self.status = "Microsoft account signed out".into();
+                        self.microsoft_rx = None;
+                        self.microsoft_code = None;
+                        self.status = match Self::delete_microsoft_account() {
+                            Ok(()) => "Microsoft account signed out".into(),
+                            Err(error) => error.to_string(),
+                        };
                     }
                 });
             } else if self.microsoft_rx.is_some() {
