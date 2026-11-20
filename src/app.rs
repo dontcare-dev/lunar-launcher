@@ -1420,20 +1420,6 @@ impl LunarApp {
                                 Err(error) => self.status = error.to_string(),
                             }
                         }
-                        let nyx_compatible = pack.minecraft == "1.21.1" && pack.loaders.contains_key("fabric-loader");
-                        if ui.add_enabled(nyx_compatible && !self.content_busy, egui::Button::new("Nyx Client")).clicked() {
-                            let instance = pack.instance.clone();
-                            let minecraft = pack.minecraft.clone();
-                            let (tx, rx) = mpsc::channel();
-                            self.content_install_rx = Some(rx);
-                            self.content_busy = true;
-                            self.status = format!("Installing Nyx Client into {}…", pack.name);
-                            std::thread::spawn(move || {
-                                let result = crate::content::install_nyx_client(&instance, &minecraft, "fabric")
-                                    .map_err(|error| format!("{error:#}"));
-                                let _ = tx.send(result);
-                            });
-                        }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
                             if self.microsoft_account.is_some() {
                                 let root = self.game_root.clone();
