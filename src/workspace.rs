@@ -27,7 +27,6 @@ pub struct Instance {
 
 fn default_instance_performance() -> String { "Performance".into() }
 fn default_backup_on_exit() -> bool { true }
-}
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
