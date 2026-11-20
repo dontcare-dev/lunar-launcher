@@ -17,7 +17,7 @@ struct LauncherPreferences {
 
 impl Default for LauncherPreferences {
     fn default() -> Self {
-        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: true, animations_enabled: true, accent_rgb: [151, 169, 255] }
+        Self { memory_mb: 4096, snapshots: false, background_gif: String::new(), performance_mode: "Performance".into(), auto_sodium: false, animations_enabled: true, accent_rgb: [151, 169, 255] }
     }
 }
 
@@ -199,7 +199,7 @@ impl LunarApp {
             java_status,
             memory_mb: preferences.memory_mb.clamp(2048, 8192),
             performance_mode: preferences.performance_mode.clone(),
-            auto_sodium: preferences.auto_sodium,
+            auto_sodium: false,
             animations_enabled: preferences.animations_enabled,
             startup_at: Instant::now(),
             splash_complete: false,
