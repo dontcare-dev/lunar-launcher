@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Arc, Condvar, Mutex, mpsc::{self, Receiver, Sender}}};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownloadState {
     Queued,
     Downloading,
@@ -29,7 +30,7 @@ impl DownloadState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DownloadTask {
     pub id: u64,
     pub url: String,
@@ -59,16 +60,42 @@ pub struct DownloadManager {
     sender: Sender<Update>,
     receiver: Receiver<Update>,
     next_id: u64,
+    history_path: Option<PathBuf>,
 }
 
 impl Default for DownloadManager {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
-        Self { tasks: Vec::new(), controls: HashMap::new(), sender, receiver, next_id: 1 }
+        let history_path = directories::ProjectDirs::from("dev", "SilverDevStudios", "LUNAR")
+            .map(|dirs| dirs.data_dir().join("downloads.json"));
+        let mut tasks = history_path.as_ref()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice::<Vec<DownloadTask>>(&bytes).ok())
+            .unwrap_or_default();
+        for task in &mut tasks {
+            if !task.state.terminal() {
+                task.state = DownloadState::Failed("Interrupted when Lunar closed".into());
+            }
+        }
+        let next_id = tasks.iter().map(|task| task.id).max().unwrap_or(0).saturating_add(1);
+        let manager = Self { tasks, controls: HashMap::new(), sender, receiver, next_id, history_path };
+        manager.persist();
+        manager
     }
 }
 
 impl DownloadManager {
+    fn persist(&self) {
+        let Some(path) = &self.history_path else { return };
+        if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
+        if let Ok(bytes) = serde_json::to_vec_pretty(&self.tasks) {
+            let temporary = path.with_extension("tmp");
+            if fs::write(&temporary, bytes).is_ok() {
+                if fs::rename(&temporary, path).is_err() { let _ = fs::remove_file(temporary); }
+            }
+        }
+    }
+
     pub fn tasks(&self) -> &[DownloadTask] {
         &self.tasks
     }
@@ -100,6 +127,7 @@ impl DownloadManager {
         self.controls.insert(id, Arc::clone(&control));
         let task = DownloadTask { id, url: url.clone(), filename: destination.file_name().and_then(|value| value.to_str()).unwrap_or(&filename).to_owned(), destination: destination.clone(), state: DownloadState::Queued, downloaded: 0, total: None };
         self.tasks.push(task);
+        self.persist();
         let sender = self.sender.clone();
         std::thread::spawn(move || {
             let temporary = destination.with_extension("lunar-part");
@@ -153,6 +181,7 @@ impl DownloadManager {
         {
             state.paused = true;
             if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Paused; }
+            self.persist();
         }
     }
 
@@ -163,6 +192,7 @@ impl DownloadManager {
             state.paused = false;
             control.1.notify_all();
             if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) { task.state = DownloadState::Downloading; }
+            self.persist();
         }
     }
 
@@ -173,6 +203,7 @@ impl DownloadManager {
             state.cancelled = true;
             state.paused = false;
             control.1.notify_all();
+            self.persist();
         }
     }
 
@@ -187,7 +218,9 @@ impl DownloadManager {
     }
 
     pub fn poll(&mut self) {
+        let mut changed = false;
         while let Ok(update) = self.receiver.try_recv() {
+            changed = true;
             if let Some(task) = self.tasks.iter_mut().find(|task| task.id == update.id) {
                 task.state = update.state.clone();
                 task.downloaded = update.downloaded;
@@ -197,6 +230,7 @@ impl DownloadManager {
                 self.controls.remove(&update.id);
             }
         }
+        if changed { self.persist(); }
     }
 
     pub fn has_active(&self) -> bool {
@@ -205,6 +239,7 @@ impl DownloadManager {
 
     pub fn clear_finished(&mut self) {
         self.tasks.retain(|task| !task.state.terminal());
+        self.persist();
     }
 }
 #[cfg(test)]
