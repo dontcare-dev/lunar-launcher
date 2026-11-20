@@ -76,7 +76,6 @@ enum Screen {
     LivePerformance,
     PlayStats,
     SkinManager,
-    Credits,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -165,8 +164,6 @@ pub struct LunarApp {
     skin_editor: Option<image::RgbaImage>,
     skin_editor_profile: String,
     skin_color: Color32,
-    lanyard_rx: Option<Receiver<Result<(String, Option<egui::ColorImage>, String, Vec<String>), String>>>,
-    lanyard_profile: Option<(String, Option<egui::TextureHandle>, String, Vec<String>)>,
 }
 
 impl LunarApp {
@@ -267,8 +264,6 @@ impl LunarApp {
             skin_editor: None,
             skin_editor_profile: String::new(),
             skin_color: Color32::from_rgb(151, 169, 255),
-            lanyard_rx: None,
-            lanyard_profile: None,
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -303,45 +298,6 @@ impl LunarApp {
             let path = app.background_gif.clone();
             app.load_background_gif(path);
         }
-        let (lanyard_tx, lanyard_rx) = mpsc::channel();
-        app.lanyard_rx = Some(lanyard_rx);
-        std::thread::spawn(move || {
-            let result = (|| -> Result<(String, Option<egui::ColorImage>, String, Vec<String>), String> {
-                let endpoint = "https://api.lanyard.rest/v1/users/1429093326505640016";
-                let response: serde_json::Value = reqwest::blocking::get(endpoint)
-                    .and_then(|response| response.error_for_status())
-                    .map_err(|error| error.to_string())?
-                    .json()
-                    .map_err(|error| error.to_string())?;
-                if response["success"] != true {
-                    return Err("Lanyard could not find this Discord profile".into());
-                }
-                let user = &response["data"]["discord_user"];
-                let name = user["global_name"].as_str()
-                    .or_else(|| user["username"].as_str())
-                    .unwrap_or("Discord user").to_owned();
-                let avatar = user["avatar"].as_str().map(|hash| {
-                    format!("https://cdn.discordapp.com/avatars/1429093326505640016/{hash}.png?size=256")
-                });
-                let avatar_image = avatar.and_then(|url| {
-                    reqwest::blocking::get(url).ok()?.bytes().ok()
-                        .and_then(|bytes| image::load_from_memory(&bytes).ok())
-                        .map(|image| {
-                            let image = image.to_rgba8();
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [image.width() as usize, image.height() as usize],
-                                image.as_raw(),
-                            )
-                        })
-                });
-                let status = response["data"]["discord_status"].as_str().unwrap_or("offline").to_owned();
-                let activities = response["data"]["activities"].as_array()
-                    .map(|items| items.iter().filter_map(|item| item["name"].as_str().map(str::to_owned)).collect())
-                    .unwrap_or_default();
-                Ok((name, avatar_image, status, activities))
-            })();
-            let _ = lanyard_tx.send(result);
-        });
         app
     }
 
@@ -778,7 +734,6 @@ impl LunarApp {
                         ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                         ("Skin Manager", Screen::SkinManager, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
-                        ("Credits", Screen::Credits, "bytes://lunar-credits.svg", include_bytes!("../assets/icons/credits.svg")),
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -1961,69 +1916,6 @@ impl LunarApp {
         });
     }
 
-    fn credits_ui(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Credits", "The person behind Lunar Launcher.");
-        if let Some(rx) = self.lanyard_rx.take() {
-            match rx.try_recv() {
-                Ok(Ok((name, avatar, status, activities))) => {
-                    let texture = avatar.map(|image| ui.ctx().load_texture("lanyard-discord-avatar", image, egui::TextureOptions::LINEAR));
-                    self.lanyard_profile = Some((name, texture, status, activities));
-                }
-                Ok(Err(error)) => {
-                    self.status = format!("Lanyard profile unavailable: {error}");
-                }
-                Err(TryRecvError::Disconnected) => {}
-                Err(TryRecvError::Empty) => {
-                    self.lanyard_rx = Some(rx);
-                    ui.ctx().request_repaint_after(Duration::from_millis(500));
-                }
-            }
-        }
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if let Some((_, Some(avatar), _, _)) = &self.lanyard_profile {
-                    ui.add(egui::Image::new((avatar.id(), Vec2::splat(64.0))).corner_radius(egui::CornerRadius::same(32)));
-                } else {
-                    ui.label(RichText::new("NYX").size(30.0).strong().color(self.accent));
-                }
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(self.lanyard_profile.as_ref().map(|profile| profile.0.as_str()).unwrap_or("nyx")).size(22.0).strong());
-                    ui.label(RichText::new("Full-stack developer · Builder of things").color(Color32::GRAY));
-                    ui.label("meow~");
-                });
-            });
-            if let Some((_, _, status, activities)) = &self.lanyard_profile {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("● {status}")).color(match status.as_str() {
-                        "online" => Color32::from_rgb(88, 210, 135),
-                        "idle" => Color32::from_rgb(235, 190, 90),
-                        "dnd" => Color32::from_rgb(230, 90, 100),
-                        _ => Color32::GRAY,
-                    }));
-                    if !activities.is_empty() {
-                        ui.label(activities.join(" · "));
-                    }
-                });
-            } else if self.lanyard_rx.is_some() {
-                ui.label(RichText::new("Loading live Discord profile from Lanyard…").size(11.0).color(Color32::GRAY));
-            }
-            ui.add_space(12.0);
-            ui.label(RichText::new("DISCORD").size(10.0).strong().color(self.accent));
-            ui.label("1429093326505640016");
-            ui.hyperlink_to("Open Discord profile", "https://discord.com/users/1429093326505640016");
-            ui.add_space(8.0);
-            ui.label(RichText::new("INSTAGRAM").size(10.0).strong().color(self.accent));
-            ui.hyperlink_to("@nyxcxcxcx", "https://www.instagram.com/nyxcxcxcx/");
-            ui.add_space(8.0);
-            ui.label(RichText::new("LIVE DISCORD PRESENCE").size(10.0).strong().color(self.accent));
-            ui.label("Lanyard profile endpoint");
-            ui.hyperlink_to("View Lanyard presence data", "https://api.lanyard.rest/v1/users/1429093326505640016");
-            ui.label(RichText::new("Lanyard provides Discord profile and presence data when the account is available to its service.").size(11.0).color(Color32::GRAY));
-        });
-        ui.add_space(10.0);
-        ui.label(RichText::new("Built with care for the Minecraft community.").size(12.0).color(Color32::GRAY));
-    }
-
     fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Play Stats", "Your Minecraft play history across Lunar Launcher.");
         let total = self.play_stats.total_playtime_seconds;
@@ -2442,7 +2334,6 @@ impl eframe::App for LunarApp {
                             Screen::Servers => self.servers(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
                             Screen::SkinManager => self.skin_manager_ui(ui),
-                            Screen::Credits => self.credits_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
