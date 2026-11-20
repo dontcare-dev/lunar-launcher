@@ -83,6 +83,12 @@ type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
 type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 
+enum MicrosoftLoginEvent {
+    DeviceCode { code: String, url: String },
+    Complete(crust_core::authenticator::Account),
+    Failed(String),
+}
+
 pub struct LunarApp {
     profiles: ProfileStore,
     screen: Screen,
@@ -148,6 +154,9 @@ pub struct LunarApp {
     memory_history: Vec<f32>,
     game_cpu_history: Vec<f32>,
     game_memory_history: Vec<f32>,
+    microsoft_rx: Option<Receiver<MicrosoftLoginEvent>>,
+    microsoft_account: Option<crust_core::authenticator::Account>,
+    microsoft_code: Option<(String, String)>,
 }
 
 impl LunarApp {
@@ -240,6 +249,9 @@ impl LunarApp {
             memory_history: Vec::with_capacity(120),
             game_cpu_history: Vec::with_capacity(120),
             game_memory_history: Vec::with_capacity(120),
+            microsoft_rx: None,
+            microsoft_account: None,
+            microsoft_code: None,
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -920,8 +932,112 @@ impl LunarApp {
         }
     }
 
+    fn start_microsoft_login(&mut self) {
+        if self.microsoft_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.microsoft_rx = Some(rx);
+        self.microsoft_code = None;
+        self.status = "Starting Microsoft sign-in…".into();
+        std::thread::spawn(move || {
+            let result = (|| -> anyhow::Result<()> {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .enable_time()
+                    .build()?;
+                runtime.block_on(async {
+                    let auth = crust_core::authenticator::Authenticator::new()
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    let flow = auth.device_code().await
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    let code = flow.user_code().to_owned();
+                    let url = flow.verification_uri_complete();
+                    tx.send(MicrosoftLoginEvent::DeviceCode { code, url })
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    let account = flow.wait().await
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    tx.send(MicrosoftLoginEvent::Complete(account))
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    Ok::<(), anyhow::Error>(())
+                })?;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                let _ = tx.send(MicrosoftLoginEvent::Failed(format!("{error:#}")));
+            }
+        });
+    }
+
+    fn poll_microsoft_login(&mut self, ctx: &egui::Context) {
+        let mut keep_polling = false;
+        if let Some(rx) = &self.microsoft_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(MicrosoftLoginEvent::DeviceCode { code, url }) => {
+                        self.microsoft_code = Some((code, url));
+                        self.status = "Enter the displayed code on Microsoft's sign-in page".into();
+                        keep_polling = true;
+                    }
+                    Ok(MicrosoftLoginEvent::Complete(account)) => {
+                        self.status = format!("Microsoft account connected: {}", account.name);
+                        self.microsoft_account = Some(account);
+                        self.microsoft_code = None;
+                        self.microsoft_rx = None;
+                        return;
+                    }
+                    Ok(MicrosoftLoginEvent::Failed(error)) => {
+                        self.status = format!("Microsoft sign-in failed: {error}");
+                        self.microsoft_code = None;
+                        self.microsoft_rx = None;
+                        return;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        keep_polling = true;
+                        break;
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        self.status = "Microsoft sign-in stopped unexpectedly".into();
+                        self.microsoft_code = None;
+                        self.microsoft_rx = None;
+                        return;
+                    }
+                }
+            }
+        }
+        if keep_polling {
+            ctx.request_repaint_after(Duration::from_millis(300));
+        }
+    }
+
     fn profiles(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Profiles", "Local offline identities. These do not authenticate with Minecraft services.");
+        Self::heading(ui, "Profiles", "Choose a Microsoft account or a local offline profile.");
+        ui.group(|ui| {
+            ui.label(RichText::new("MICROSOFT ACCOUNT").size(10.0).color(self.accent).strong());
+            if let Some(account) = &self.microsoft_account {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&account.name).size(17.0).strong());
+                        ui.label(RichText::new("Microsoft authenticated · Minecraft Java profile").size(11.0).color(Color32::GRAY));
+                    });
+                    if ui.button("Sign out").clicked() {
+                        self.microsoft_account = None;
+                        self.status = "Microsoft account signed out".into();
+                    }
+                });
+            } else if self.microsoft_rx.is_some() {
+                ui.label("Waiting for Microsoft authorization…");
+                if let Some((code, url)) = &self.microsoft_code {
+                    ui.label(RichText::new(format!("CODE  {code}")).size(22.0).strong().monospace().color(self.accent));
+                    ui.hyperlink_to("Open Microsoft device sign-in", url);
+                    ui.label(RichText::new("Complete sign-in in your browser. Lunar never asks for your Microsoft password.").size(11.0).color(Color32::GRAY));
+                }
+            } else if ui.button("Sign in with Microsoft").clicked() {
+                self.start_microsoft_login();
+            }
+        });
+        ui.add_space(12.0);
+        ui.label(RichText::new("OFFLINE PROFILES").size(10.0).color(Color32::GRAY).strong());
+        ui.label(RichText::new("Offline profiles do not authenticate with Microsoft or grant game ownership. They only work on servers that allow offline-mode accounts.").size(11.0).color(Color32::GRAY));
         ui.group(|ui| {
             ui.label(RichText::new("CREATE PROFILE").size(10.0).color(Color32::GRAY).strong());
             ui.horizontal(|ui| {
@@ -1861,6 +1977,7 @@ impl eframe::App for LunarApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_versions(ctx);
         self.poll_launcher(ctx);
+        self.poll_microsoft_login(ctx);
         if self.last_metrics_refresh.elapsed() >= Duration::from_secs(1) {
             self.system_monitor.refresh_all();
             let cpu = self.system_monitor.global_cpu_usage().clamp(0.0, 100.0);
