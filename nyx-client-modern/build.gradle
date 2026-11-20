@@ -17,11 +17,14 @@ loom {
         }
     }
 }
+def modVersion = project.version.toString()
+def minecraftVersion = project.property("minecraft_version").toString()
+
 processResources {
-    inputs.property "version", project.version
-    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "version", modVersion
+    inputs.property "minecraft_version", minecraftVersion
     filesMatching("fabric.mod.json") {
-        expand "version": project.version, "minecraft_version": project.minecraft_version
+        expand "version": modVersion, "minecraft_version": minecraftVersion
     }
 }
 tasks.withType(JavaCompile).configureEach { options.release = 25 }
