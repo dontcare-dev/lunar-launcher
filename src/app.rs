@@ -78,6 +78,8 @@ enum Screen {
     PlayStats,
     SkinManager,
     Downloads,
+    Instances,
+    CrashAnalyzer,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -149,6 +151,8 @@ pub struct LunarApp {
     background_rx: Option<Receiver<BackgroundLoadResult>>,
     workspace_instances: Vec<crate::workspace::Instance>,
     workspace_selected: Option<String>,
+    new_instance_name: String,
+    crash_analysis: Option<crate::crash::CrashAnalysis>,
     play_stats: crate::stats::PlayStats,
     session_started_at: Option<Instant>,
     session_started_epoch: u64,
@@ -258,6 +262,8 @@ impl LunarApp {
             background_rx: None,
             workspace_instances: crate::workspace::list_instances(&game_root).unwrap_or_default(),
             workspace_selected: None,
+            new_instance_name: String::new(),
+            crash_analysis: None,
             play_stats: crate::stats::PlayStats::load(),
             session_started_at: None,
             session_started_epoch: 0,
@@ -613,10 +619,12 @@ impl LunarApp {
                 && let Some(instance) = self.workspace_instances.iter().find(|entry| entry.name == instance_name)
             {
                 let instance_path = crate::workspace::instance_path(&self.game_root, instance);
+                if instance.backup_on_exit {
                 match crate::workspace::backup_all_worlds(&instance_path) {
                     Ok(backups) if !backups.is_empty() => self.status = format!("Created {} automatic world backup(s)", backups.len()),
                     Ok(_) => {},
                     Err(error) => self.status = format!("Automatic world backup failed: {error}"),
+                }
                 }
             }
             if let Err(error) = self.play_stats.record(
@@ -752,7 +760,7 @@ impl LunarApp {
                 });
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                    let navigation: [NavigationItem; 15] = [
+                    let navigation: [NavigationItem; 17] = [
                         ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                         ("Play Stats", Screen::PlayStats, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
@@ -767,6 +775,8 @@ impl LunarApp {
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                         ("Skin Manager", Screen::SkinManager, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                         ("Download Center", Screen::Downloads, "bytes://lunar-download.svg", include_bytes!("../assets/icons/download.svg")),
+                        ("Instance Manager", Screen::Instances, "bytes://lunar-versions.svg", include_bytes!("../assets/icons/versions.svg")),
+                        ("Crash Analyzer", Screen::CrashAnalyzer, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -2307,6 +2317,157 @@ impl LunarApp {
         (!value.is_empty()).then(|| PathBuf::from(value))
     }
 
+    fn instance_manager_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Instance Manager", "Separate game versions, mods, settings, Java runtimes and saves.");
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(RichText::new("CREATE INSTANCE").strong().size(11.0).color(self.accent));
+            ui.horizontal(|ui| {
+                ui.add_sized([250.0, 34.0], egui::TextEdit::singleline(&mut self.new_instance_name).hint_text("Instance name"));
+                if ui.add_enabled(!self.new_instance_name.trim().is_empty() && self.installed_ids.contains(&self.selected_version), egui::Button::new("Create")).clicked() {
+                    match crate::workspace::create_instance(&self.game_root, &self.new_instance_name, &self.selected_version) {
+                        Ok(instance) => {
+                            self.workspace_selected = Some(instance.id.clone());
+                            self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                            self.new_instance_name.clear();
+                            self.status = format!("Created instance {}", instance.name);
+                        }
+                        Err(error) => self.status = error.to_string(),
+                    }
+                }
+            });
+            ui.label(RichText::new(format!("Base version: {}", self.selected_version)).size(10.0).color(Color32::GRAY));
+        });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{} INSTANCE(S)", self.workspace_instances.len())).strong().color(self.accent));
+            if ui.button("Refresh").clicked() {
+                self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+            }
+        });
+        if self.workspace_instances.is_empty() {
+            ui.label("No isolated instances yet. Create one above.");
+            return;
+        }
+        let instances = self.workspace_instances.clone();
+        for instance in &instances {
+            let selected = self.workspace_selected.as_deref() == Some(instance.id.as_str());
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&instance.name).strong());
+                        ui.label(RichText::new(format!("Minecraft {} · {} · {} launches", instance.minecraft, instance.loader.as_deref().unwrap_or("Vanilla"), instance.play_count)).size(10.0).color(Color32::GRAY));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(if selected { "Selected" } else { "Edit settings" }).clicked() {
+                            self.workspace_selected = Some(instance.id.clone());
+                        }
+                    });
+                });
+            });
+        }
+        let Some(mut instance) = self.workspace_instances.iter().find(|item| Some(item.id.as_str()) == self.workspace_selected.as_deref()).cloned() else { return; };
+        let path = crate::workspace::instance_path(&self.game_root, &instance);
+        ui.add_space(12.0);
+        Self::heading(ui, &instance.name, "INSTANCE CONFIGURATION");
+        ui.horizontal(|ui| {
+            ui.label("Memory allocation");
+            ui.add(egui::Slider::new(&mut instance.memory_mb, 1024..=16384).step_by(512.0).suffix(" MB"));
+        });
+        let mut java = instance.java_major.unwrap_or(0);
+        egui::ComboBox::from_id_salt("instance_java_runtime").selected_text(if java == 0 { "Automatic Java" } else { &format!("Java {java}") }).show_ui(ui, |ui| {
+            ui.selectable_value(&mut java, 0, "Automatic Java");
+            for major in [8, 17, 21] { ui.selectable_value(&mut java, major, format!("Java {major}")); }
+        });
+        instance.java_major = (java != 0).then_some(java);
+        egui::ComboBox::from_id_salt("instance_performance").selected_text(&instance.performance_mode).show_ui(ui, |ui| {
+            for mode in ["Maximum FPS", "Performance", "Balanced", "Custom"] { ui.selectable_value(&mut instance.performance_mode, mode.to_owned(), mode); }
+        });
+        egui::ComboBox::from_id_salt("instance_loader").selected_text(instance.loader.as_deref().unwrap_or("Vanilla")).show_ui(ui, |ui| {
+            ui.selectable_value(&mut instance.loader, None, "Vanilla");
+            for loader in ["fabric", "forge", "neoforge", "quilt"] { ui.selectable_value(&mut instance.loader, Some(loader.to_owned()), loader); }
+        });
+        ui.label("Additional JVM arguments");
+        ui.add_sized([ui.available_width(), 58.0], egui::TextEdit::multiline(&mut instance.jvm_arguments).hint_text("-XX:+UseZGC"));
+        ui.checkbox(&mut instance.backup_on_exit, "Back up every world automatically when Minecraft closes");
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Save instance settings").clicked() {
+                match crate::workspace::save_instance(&self.game_root, &instance) {
+                    Ok(()) => {
+                        self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                        self.status = format!("Saved settings for {}", instance.name);
+                    }
+                    Err(error) => self.status = error.to_string(),
+                }
+            }
+            if ui.button("Open instance folder").clicked() { self.open_local_path(path.clone()); }
+            if ui.button("Analyze instance logs").clicked() {
+                self.crash_analysis = crate::crash::analyze(&self.game_root, Some(&path)).ok();
+                self.screen = Screen::CrashAnalyzer;
+            }
+        });
+        ui.add_space(8.0);
+        if ui.button("Launch this instance").clicked() {
+            if let Some(account) = self.microsoft_account.clone() {
+                match launcher::load_installed(&instance.minecraft, &self.game_root) {
+                    Ok(mut installed) => {
+                        installed.game_directory = Some(path);
+                        match launcher::launch_with_account_settings(&installed, &account, instance.memory_mb, &instance.performance_mode, instance.java_major, &instance.jvm_arguments) {
+                            Ok(process) => {
+                                self.game_process = Some(process);
+                                self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
+                                if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut instance) { self.status = error.to_string(); }
+                                self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                                self.status = format!("Launching {}", instance.name);
+                            }
+                            Err(error) => self.status = format!("{error:#}"),
+                        }
+                    }
+                    Err(error) => self.status = error.to_string(),
+                }
+            } else {
+                self.status = "Sign in with Microsoft to launch Minecraft Java Edition".into();
+                self.screen = Screen::Profiles;
+            }
+        }
+        ui.label(RichText::new("Instance settings are saved independently. JVM arguments are split safely and passed as separate process arguments.").size(10.0).color(Color32::GRAY));
+    }
+
+    fn crash_analyzer_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Crash Analyzer", "Inspect the latest crash report or game log and identify common failure signatures.");
+        let selected = self.workspace_instances.iter().find(|item| Some(item.id.as_str()) == self.workspace_selected.as_deref()).cloned();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("TARGET").strong().color(self.accent));
+            ui.label(selected.as_ref().map(|item| item.name.as_str()).unwrap_or("Global Minecraft folder"));
+            if ui.button("Analyze latest report").clicked() {
+                let path = selected.as_ref().map(|item| crate::workspace::instance_path(&self.game_root, item));
+                match crate::crash::analyze(&self.game_root, path.as_deref()) {
+                    Ok(result) => { self.status = result.summary.clone(); self.crash_analysis = Some(result); }
+                    Err(error) => { self.status = error.to_string(); self.crash_analysis = None; }
+                }
+            }
+        });
+        if let Some(analysis) = self.crash_analysis.clone() {
+            ui.add_space(10.0);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.label(RichText::new(&analysis.summary).strong().size(16.0).color(self.accent));
+                ui.label(RichText::new(analysis.source.display().to_string()).size(10.0).color(Color32::GRAY));
+                for (index, finding) in analysis.findings.iter().enumerate() {
+                    ui.label(RichText::new(format!("{}. {}", index + 1, finding)).size(12.0));
+                }
+                if ui.button("Open source log").clicked() { self.open_local_path(analysis.source.clone()); }
+            });
+            egui::CollapsingHeader::new("Last 45 log lines").default_open(true).show(ui, |ui| {
+                ui.add(egui::TextEdit::multiline(&mut analysis.excerpt.as_str()).desired_rows(18).code_editor().interactive(false));
+            });
+        } else {
+            ui.group(|ui| {
+                ui.label(RichText::new("No analysis loaded").strong());
+                ui.label("Run the analyzer to inspect the newest crash report or log for this target.");
+            });
+        }
+        ui.label(RichText::new("The analyzer uses local log signatures and gives diagnostic leads; it does not modify mods or delete files.").size(10.0).color(Color32::GRAY));
+    }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Settings", "Make Lunar Launcher feel like yours.");
         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -2651,6 +2812,8 @@ impl eframe::App for LunarApp {
                             Screen::PlayStats => self.play_stats_ui(ui),
                             Screen::SkinManager => self.skin_manager_ui(ui),
                             Screen::Downloads => self.download_center_ui(ui),
+                            Screen::Instances => self.instance_manager_ui(ui),
+                            Screen::CrashAnalyzer => self.crash_analyzer_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
