@@ -145,6 +145,8 @@ pub struct LunarApp {
     last_metrics_refresh: Instant,
     cpu_history: Vec<f32>,
     memory_history: Vec<f32>,
+    game_cpu_history: Vec<f32>,
+    game_memory_history: Vec<f32>,
 }
 
 impl LunarApp {
@@ -235,6 +237,8 @@ impl LunarApp {
             last_metrics_refresh: Instant::now(),
             cpu_history: Vec::with_capacity(120),
             memory_history: Vec::with_capacity(120),
+            game_cpu_history: Vec::with_capacity(120),
+            game_memory_history: Vec::with_capacity(120),
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -1448,8 +1452,13 @@ impl LunarApp {
 
         ui.add_space(16.0);
         ui.columns(2, |columns| {
-            Self::performance_history_chart(&mut columns[0], "CPU LOAD · LAST 2 MINUTES", &self.cpu_history, self.accent);
-            Self::performance_history_chart(&mut columns[1], "RAM USAGE · LAST 2 MINUTES", &self.memory_history, self.accent);
+            Self::performance_history_chart(&mut columns[0], "SYSTEM CPU · LAST 2 MINUTES", &self.cpu_history, self.accent);
+            Self::performance_history_chart(&mut columns[1], "SYSTEM RAM · LAST 2 MINUTES", &self.memory_history, self.accent);
+        });
+        ui.add_space(8.0);
+        ui.columns(2, |columns| {
+            Self::performance_history_chart(&mut columns[0], "MINECRAFT CPU · LAST 2 MINUTES", &self.game_cpu_history, self.accent);
+            Self::performance_history_chart(&mut columns[1], "MINECRAFT RAM · % OF SYSTEM MEMORY", &self.game_memory_history, self.accent);
         });
 
         ui.add_space(12.0);
@@ -1775,8 +1784,18 @@ impl eframe::App for LunarApp {
             let memory = (self.system_monitor.used_memory() as f32 / total * 100.0).clamp(0.0, 100.0);
             self.cpu_history.push(cpu);
             self.memory_history.push(memory);
-            if self.cpu_history.len() > 120 { self.cpu_history.remove(0); }
-            if self.memory_history.len() > 120 { self.memory_history.remove(0); }
+            let game_metrics = self.game_process.as_ref().and_then(|process| {
+                self.system_monitor.process(sysinfo::Pid::from_u32(process.id())).map(|game| {
+                    let process_memory = game.memory() as f32;
+                    (game.cpu_usage().clamp(0.0, 100.0), (process_memory / total * 100.0).clamp(0.0, 100.0))
+                })
+            });
+            let (game_cpu, game_memory) = game_metrics.unwrap_or((0.0, 0.0));
+            self.game_cpu_history.push(game_cpu);
+            self.game_memory_history.push(game_memory);
+            for history in [&mut self.cpu_history, &mut self.memory_history, &mut self.game_cpu_history, &mut self.game_memory_history] {
+                if history.len() > 120 { history.remove(0); }
+            }
             self.last_metrics_refresh = Instant::now();
         }
         self.poll_background(ctx);
