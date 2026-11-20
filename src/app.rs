@@ -86,6 +86,7 @@ type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String
 type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
 type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
+type SkinTexturedFace = (f32, [egui::Pos2; 4], (u32, u32, u32, u32));
 
 enum MicrosoftLoginEvent {
     DeviceCode { code: String, url: String },
@@ -1939,8 +1940,10 @@ impl LunarApp {
                             ui.label(RichText::new("LUNAR TASK").size(9.0).strong().color(self.accent));
                         } else {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if matches!(&task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused) {
-                                if ui.small_button("Cancel").clicked() { self.downloads.cancel(task.id); }
+                            if matches!(&task.state, crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading | crate::downloads::DownloadState::Paused)
+                                && ui.small_button("Cancel").clicked()
+                            {
+                                self.downloads.cancel(task.id);
                             }
                             match &task.state {
                                 crate::downloads::DownloadState::Queued | crate::downloads::DownloadState::Downloading => {
@@ -2033,7 +2036,7 @@ impl LunarApp {
             (egui::pos2(rect.center().x + rx * 45.0, rect.center().y - point.1 * 45.0 + rz * 9.0), rz)
         };
         let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
-        let mut textured_faces: Vec<(f32, [egui::Pos2; 4], (u32, u32, u32, u32))> = Vec::new();
+        let mut textured_faces: Vec<SkinTexturedFace> = Vec::new();
         for (center, size, base, uv_rect) in parts {
             let (cx, cy, cz) = center;
             let (sx, sy, sz) = (size.0/2.0, size.1/2.0, size.2/2.0);
@@ -2164,7 +2167,7 @@ impl LunarApp {
                     let color = Color32::from_rgba_unmultiplied(pixel[0], pixel[1], pixel[2], pixel[3]);
                     let tile = egui::Rect::from_min_size(rect.min + Vec2::new(x as f32 * cell, y as f32 * cell), Vec2::splat(cell));
                     painter.rect_filled(tile, 0.0, color);
-                    painter.rect_stroke(tile, 0.0, Stroke::new(0.35, Color32::from_rgba_unmultiplied(120, 130, 155, 70)), egui::StrokeKind::Inside);
+                    painter.rect_stroke(tile, 0.0, Stroke::new(0.35_f32, Color32::from_rgba_unmultiplied(120, 130, 155, 70)), egui::StrokeKind::Inside);
                 }
             }
             if (response.clicked() || response.dragged())
@@ -2827,7 +2830,7 @@ impl eframe::App for LunarApp {
                 .show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(Color32::from_rgba_unmultiplied(17, 23, 39, 238))
-                        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(151, 169, 255, 100)))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(151, 169, 255, 100)))
                         .corner_radius(egui::CornerRadius::same(14))
                         .inner_margin(egui::Margin::same(14))
                         .show(ui, |ui| {
