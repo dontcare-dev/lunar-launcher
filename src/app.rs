@@ -1449,7 +1449,7 @@ impl LunarApp {
             ] {
                 egui::Frame::group(ui.style())
                     .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 205))
-                    .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(self.accent.r(), self.accent.g(), self.accent.b(), 90)))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(self.accent.r(), self.accent.g(), self.accent.b(), 90)))
                     .corner_radius(egui::CornerRadius::same(14))
                     .inner_margin(egui::Margin::same(16))
                     .show(ui, |ui| {
@@ -1564,23 +1564,23 @@ impl LunarApp {
                 ui.label(RichText::new("No local skin assigned").color(Color32::GRAY));
             }
             ui.add_space(10.0);
-            if ui.button("Import PNG skin").clicked() {
-                if let Some(source) = Self::choose_content_file("skin") {
-                    let result = (|| -> anyhow::Result<()> {
-                        let image = image::open(&source)?;
-                        let (width, height) = (image.width(), image.height());
-                        let valid = (width == height && width >= 64 && width % 64 == 0)
-                            || (width == height * 2 && width % 64 == 0 && height % 32 == 0);
-                        if !valid {
-                            anyhow::bail!("Skin must use a Minecraft skin layout such as 64×64 or 64×32 (HD multiples are supported)");
-                        }
-                        fs::create_dir_all(&skin_dir)?;
-                        fs::copy(&source, &skin_path)?;
-                        Ok(())
-                    })();
-                    self.status = result.map(|_| format!("Skin imported for {selected}. Restart Minecraft to load it."))
-                        .unwrap_or_else(|error| format!("Skin import failed: {error:#}"));
-                }
+            if ui.button("Import PNG skin").clicked()
+                && let Some(source) = Self::choose_content_file("skin")
+            {
+                let result = (|| -> anyhow::Result<()> {
+                    let image = image::open(&source)?;
+                    let (width, height) = (image.width(), image.height());
+                    let valid = (width == height && width >= 64 && width % 64 == 0)
+                        || (width == height * 2 && width % 64 == 0 && height % 32 == 0);
+                    if !valid {
+                        anyhow::bail!("Skin must use a Minecraft skin layout such as 64×64 or 64×32 (HD multiples are supported)");
+                    }
+                    fs::create_dir_all(&skin_dir)?;
+                    fs::copy(&source, &skin_path)?;
+                    Ok(())
+                })();
+                self.status = result.map(|_| format!("Skin imported for {selected}. Restart Minecraft to load it."))
+                    .unwrap_or_else(|error| format!("Skin import failed: {error:#}"));
             }
         });
         ui.add_space(10.0);
