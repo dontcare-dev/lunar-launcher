@@ -2374,7 +2374,8 @@ impl LunarApp {
             ui.add(egui::Slider::new(&mut instance.memory_mb, 1024..=16384).step_by(512.0).suffix(" MB"));
         });
         let mut java = instance.java_major.unwrap_or(0);
-        egui::ComboBox::from_id_salt("instance_java_runtime").selected_text(if java == 0 { "Automatic Java" } else { &format!("Java {java}") }).show_ui(ui, |ui| {
+        let java_label = if java == 0 { "Automatic Java".to_owned() } else { format!("Java {java}") };
+        egui::ComboBox::from_id_salt("instance_java_runtime").selected_text(java_label).show_ui(ui, |ui| {
             ui.selectable_value(&mut java, 0, "Automatic Java");
             for major in [8, 17, 21] { ui.selectable_value(&mut java, major, format!("Java {major}")); }
         });
@@ -2457,7 +2458,7 @@ impl LunarApp {
                 if ui.button("Open source log").clicked() { self.open_local_path(analysis.source.clone()); }
             });
             egui::CollapsingHeader::new("Last 45 log lines").default_open(true).show(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut analysis.excerpt.as_str()).desired_rows(18).code_editor().interactive(false));
+                ui.add(egui::TextEdit::multiline(&mut analysis.excerpt).desired_rows(18).code_editor().interactive(false));
             });
         } else {
             ui.group(|ui| {
