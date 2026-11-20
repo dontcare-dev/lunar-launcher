@@ -1599,14 +1599,14 @@ impl LunarApp {
                             });
                         }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
-                            if self.microsoft_account.is_some() {
+                            if self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|profile| &profile.name == name)) {
                                 let root = self.game_root.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.modpack_launch_rx = Some(rx);
                                 self.active_modpack_task = Some(self.downloads.begin_operation("Prepare modpack instance", root.clone()));
                                 self.status = format!("Preparing {}…", pack.name);
                                 std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
-                            } else { self.status = "Sign in with Microsoft to launch a modpack".into(); }
+                            } else { self.status = "Create or select an offline profile before launching".into(); self.screen = Screen::Profiles; }
                         }
                     });
                 });
