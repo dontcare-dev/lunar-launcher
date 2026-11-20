@@ -582,8 +582,8 @@ impl LunarApp {
             let center = rect.center();
             let pulse = (elapsed * 2.4).sin() * 0.5 + 0.5;
             painter.circle_filled(center, 54.0 + pulse * 8.0, Color32::from_rgba_unmultiplied(111, 139, 255, 22));
-            painter.circle_stroke(center, 72.0 + pulse * 5.0, Stroke::new(1.2, Color32::from_rgba_unmultiplied(145, 169, 255, 70)));
-            painter.circle_stroke(center, 91.0 + pulse * 7.0, Stroke::new(0.8, Color32::from_rgba_unmultiplied(145, 169, 255, 35)));
+            painter.circle_stroke(center, 72.0 + pulse * 5.0, Stroke::new(1.2_f32, Color32::from_rgba_unmultiplied(145, 169, 255, 70)));
+            painter.circle_stroke(center, 91.0 + pulse * 7.0, Stroke::new(0.8_f32, Color32::from_rgba_unmultiplied(145, 169, 255, 35)));
             painter.circle_filled(center + egui::vec2((elapsed * 0.8).cos() * 78.0, (elapsed * 0.8).sin() * 78.0), 3.0, Color32::from_rgb(190, 207, 255));
             let moon = center + egui::vec2(-15.0, -18.0);
             painter.circle_filled(moon, 36.0, Color32::from_rgb(174, 195, 255));
