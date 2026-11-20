@@ -1213,7 +1213,7 @@ impl LunarApp {
                                             _ => crate::content::install_modpack(&id, &root)?,
                                         };
                                         let registry_root = if kind == "modpack" { root.as_path() } else { target };
-                                        crate::content::mark_project_installed(registry_root, &kind, &id)?;
+                                        crate::content::mark_project_installed(registry_root, &kind, &id, &installed)?;
                                         Ok(installed)
                                     })().map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
