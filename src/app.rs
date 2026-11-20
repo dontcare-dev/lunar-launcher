@@ -119,6 +119,8 @@ pub struct LunarApp {
     splash_complete: bool,
     game_process: Option<Child>,
     content_kind: String,
+    content_tab: String,
+    loader_kind: String,
     content_results_kind: String,
     content_search_kind: String,
     content_query: String,
@@ -214,6 +216,8 @@ impl LunarApp {
             splash_complete: false,
             game_process: None,
             content_kind: "modpack".into(),
+            content_tab: "browse".into(),
+            loader_kind: "fabric".into(),
             content_results_kind: "modpack".into(),
             content_search_kind: "modpack".into(),
             content_query: String::new(),
@@ -898,6 +902,35 @@ impl LunarApp {
 
     fn versions(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Versions", "Official Minecraft Java Edition release metadata.");
+        ui.group(|ui| {
+            ui.label(RichText::new("LOADER INSTALLER").size(10.0).strong().color(self.accent));
+            ui.horizontal_wrapped(|ui| {
+                egui::ComboBox::from_id_salt("version_loader_kind")
+                    .selected_text(self.loader_kind.to_uppercase())
+                    .show_ui(ui, |ui| {
+                        for loader in ["vanilla", "fabric", "forge", "neoforge", "quilt"] {
+                            ui.selectable_value(&mut self.loader_kind, loader.to_owned(), loader.to_uppercase());
+                        }
+                    });
+                let ready = !self.selected_version.is_empty() && self.install_rx.is_none() && !self.content_busy;
+                if ui.add_enabled(ready, egui::Button::new(format!("Install {} profile", self.loader_kind.to_uppercase()))).clicked() {
+                    let minecraft = self.selected_version.clone();
+                    let loader = self.loader_kind.clone();
+                    let root = self.game_root.clone();
+                    let instance = root.join("loader-profiles").join(format!("{minecraft}-{loader}"));
+                    let (tx, rx) = mpsc::channel();
+                    self.install_rx = Some(rx);
+                    self.content_busy = true;
+                    self.status = format!("Installing {loader} for Minecraft {minecraft}…");
+                    std::thread::spawn(move || {
+                        let result = crate::loaders::prepare_instance(&minecraft, Some(&loader), &root, &instance)
+                            .map_err(|error| format!("{error:#}"));
+                        let _ = tx.send(result);
+                    });
+                }
+            });
+            ui.label(RichText::new("Installs a compatible game profile and its required loader libraries. Select a Minecraft version below first.").size(10.0).color(Color32::GRAY));
+        });
         ui.horizontal(|ui| {
             ui.add_sized([260.0, 30.0], egui::TextEdit::singleline(&mut self.version_filter).hint_text("Search every version"));
             if ui.button("Refresh manifest").clicked() { self.refresh_versions(); }
@@ -1320,6 +1353,49 @@ impl LunarApp {
                     self.open_local_path(content_root.join(folder));
                 }
             });
+        }
+        if self.content_kind != "modpack" {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.content_tab, "browse".into(), "Browse");
+                ui.selectable_value(&mut self.content_tab, "installed".into(), "Installed");
+            });
+            if self.content_tab == "installed" {
+                let folder = match self.content_kind.as_str() {
+                    "mod" => "mods",
+                    "resourcepack" => "resourcepacks",
+                    _ => "shaderpacks",
+                };
+                let files = crate::content::list_files(&content_root, folder).unwrap_or_default();
+                ui.label(RichText::new(format!("{} installed item(s)", files.len())).size(11.0).color(Color32::GRAY));
+                if files.is_empty() {
+                    ui.group(|ui| {
+                        ui.label(RichText::new("Nothing installed yet").strong());
+                        ui.label("Packages installed for this target will appear here.");
+                    });
+                }
+                egui::ScrollArea::vertical().max_height(430.0).show(ui, |ui| {
+                    for path in files {
+                        let filename = path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown package").to_owned();
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&filename).strong());
+                                    ui.label(RichText::new(path.display().to_string()).size(9.0).color(Color32::GRAY));
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if ui.button("Uninstall").clicked() {
+                                        match crate::content::remove_file(&path, &content_root, folder) {
+                                            Ok(()) => self.status = format!("Uninstalled {filename}"),
+                                            Err(error) => self.status = format!("Could not uninstall {filename}: {error}"),
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    }
+                });
+                return;
+            }
         }
         if self.content_busy {
             ui.horizontal(|ui| { ui.spinner(); ui.label(format!("Loading {}…", page_title.to_lowercase())); });
@@ -2196,6 +2272,32 @@ impl eframe::App for LunarApp {
                         }
                     });
             });
+        if self.content_install_rx.is_some() || self.install_rx.is_some() || self.modpack_launch_rx.is_some() || self.java_install_rx.is_some() || self.install_progress.is_some() {
+            egui::Area::new(egui::Id::new("lunar_download_toast"))
+                .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-22.0, -62.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(17, 23, 39, 238))
+                        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(151, 169, 255, 100)))
+                        .corner_radius(egui::CornerRadius::same(14))
+                        .inner_margin(egui::Margin::same(14))
+                        .show(ui, |ui| {
+                            ui.set_min_width(250.0);
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new("Lunar is downloading").strong());
+                                    ui.label(RichText::new(&self.status).size(10.0).color(Color32::from_rgb(180, 190, 210)));
+                                });
+                            });
+                            if let Some(progress) = &self.install_progress {
+                                let fraction = if progress.total == 0 { 0.0 } else { progress.completed as f32 / progress.total as f32 };
+                                ui.add(egui::ProgressBar::new(fraction).text(format!("{} · {}/{}", progress.phase, progress.completed, progress.total)));
+                            }
+                        });
+                });
+        }
         self.paint_splash(ctx);
     }
 }
