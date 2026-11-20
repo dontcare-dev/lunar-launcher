@@ -93,8 +93,8 @@ impl DownloadManager {
         if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
         if let Ok(bytes) = serde_json::to_vec_pretty(&self.tasks) {
             let temporary = path.with_extension("tmp");
-            if fs::write(&temporary, bytes).is_ok() {
-                if fs::rename(&temporary, path).is_err() { let _ = fs::remove_file(temporary); }
+            if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, path).is_err() {
+                let _ = fs::remove_file(temporary);
             }
         }
     }
