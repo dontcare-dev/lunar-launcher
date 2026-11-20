@@ -454,20 +454,35 @@ pub fn resolve_instance_dependencies(instance: &Path, minecraft: &str, loader: &
 
 pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: &str) -> Result<Vec<String>> {
     let mods_directory = instance.join("mods");
-    if !mods_directory.exists() { return Ok(vec!["No mods folder exists in this instance".into()]); }
+    if !mods_directory.exists() {
+        return Ok(vec!["No mods folder exists in this instance".into()]);
+    }
     let mut issues = Vec::new();
     let mut scanned = 0usize;
+    let mut mod_ids = HashMap::<String, String>::new();
+    let mut required_mods = Vec::<(String, String)>::new();
+    let mut seen_hashes = HashSet::<String>::new();
     for entry in fs::read_dir(&mods_directory)? {
         let entry = entry?;
-        if !entry.file_type()?.is_file() { continue; }
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()).is_none_or(|value| !value.eq_ignore_ascii_case("jar")) { continue; }
+        if path.extension().and_then(|value| value.to_str()).is_none_or(|value| !value.eq_ignore_ascii_case("jar")) {
+            continue;
+        }
         scanned += 1;
         let bytes = fs::read(&path)?;
+        let filename = path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown mod").to_owned();
+        let hash = format!("{:x}", Sha1::digest(&bytes));
+        if !seen_hashes.insert(hash) {
+            issues.push(format!("{filename}: duplicate JAR contents detected"));
+            continue;
+        }
         let mut archive = match ZipArchive::new(Cursor::new(bytes)) {
             Ok(archive) => archive,
             Err(_) => {
-                issues.push(format!("{}: file is not a readable JAR archive", path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown mod")));
+                issues.push(format!("{filename}: file is not a readable JAR archive"));
                 continue;
             }
         };
@@ -486,7 +501,30 @@ pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: 
         let name = fabric.as_ref().and_then(|value| value.get("name")).and_then(serde_json::Value::as_str)
             .or_else(|| fabric.as_ref().and_then(|value| value.get("id")).and_then(serde_json::Value::as_str))
             .or_else(|| quilt.as_ref().and_then(|value| value.get("quilt_loader")).and_then(|value| value.get("id")).and_then(serde_json::Value::as_str))
-            .unwrap_or_else(|| path.file_name().and_then(|value| value.to_str()).unwrap_or("Unknown mod"));
+            .unwrap_or(&filename).to_owned();
+        let mod_id = fabric.as_ref().and_then(|value| value.get("id")).and_then(serde_json::Value::as_str)
+            .or_else(|| quilt.as_ref().and_then(|value| value.get("quilt_loader")).and_then(|value| value.get("id")).and_then(serde_json::Value::as_str));
+        if let Some(id) = mod_id {
+            if let Some(previous) = mod_ids.insert(id.to_owned(), filename.clone()) {
+                issues.push(format!("{name}: duplicate mod ID '{id}' also found in {previous}"));
+            }
+        }
+        if let Some(dependencies) = fabric.as_ref().and_then(|value| value.get("depends")).and_then(serde_json::Value::as_object) {
+            for dependency in dependencies.keys() {
+                if !matches!(dependency.as_str(), "minecraft" | "java" | "fabricloader" | "fabric-api" | "fabric") {
+                    required_mods.push((name.clone(), dependency.clone()));
+                }
+            }
+        }
+        if let Some(dependencies) = quilt.as_ref().and_then(|value| value.get("quilt_loader")).and_then(|value| value.get("depends")).and_then(serde_json::Value::as_array) {
+            for dependency in dependencies {
+                if let Some(id) = dependency.get("id").and_then(serde_json::Value::as_str)
+                    && !matches!(id, "minecraft" | "java" | "quilt_loader" | "fabricloader")
+                {
+                    required_mods.push((name.clone(), id.to_owned()));
+                }
+            }
+        }
         let selected = loader.to_ascii_lowercase();
         if fabric.is_some() && selected != "fabric" {
             issues.push(format!("{name}: Fabric mod metadata found, but this instance uses {loader}"));
@@ -509,9 +547,16 @@ pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: 
             }
         }
     }
-    if scanned == 0 { return Ok(vec!["No JAR mods were found to inspect".into()]); }
+    for (mod_name, dependency) in required_mods {
+        if !mod_ids.contains_key(&dependency) {
+            issues.push(format!("{mod_name}: required mod dependency '{dependency}' was not found in this instance"));
+        }
+    }
+    if scanned == 0 {
+        return Ok(vec!["No JAR mods were found to inspect".into()]);
+    }
     if issues.is_empty() {
-        issues.push(format!("Scanned {scanned} JAR files. No obvious loader or Minecraft-version conflicts were found."));
+        issues.push(format!("Scanned {scanned} JAR files. No obvious loader, duplicate, or required-dependency conflicts were found."));
     } else {
         issues.insert(0, format!("Scanned {scanned} JAR files for metadata conflicts:"));
     }
