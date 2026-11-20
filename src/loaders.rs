@@ -107,13 +107,13 @@ fn run_installer(url: &str, root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn generated_profile(mc: &str, root: &Path, instance: &Path, loader: &str) -> Result<InstalledVersion> {
+fn generated_profile(mc: &str, root: &Path, instance: &Path, loader: &str, requested: Option<&str>) -> Result<InstalledVersion> {
     let mut profiles = Vec::new();
     for entry in fs::read_dir(root.join("versions"))? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() { continue; }
         let id = entry.file_name().to_string_lossy().into_owned();
-        if !id.to_lowercase().contains(loader) { continue; }
+        if !id.to_lowercase().contains(loader) || requested.is_some_and(|version| !id.contains(version)) { continue; }
         let path = entry.path().join(format!("{id}.json"));
         if let Ok(bytes) = fs::read(path)
             && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
@@ -135,8 +135,11 @@ fn forge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<Inst
     let selected = promos.pointer(&format!("/promos/{recommended}")).or_else(|| promos.pointer(&format!("/promos/{latest}"))).and_then(Value::as_str).context("No Forge release exists for this Minecraft version")?;
     let selected = if requested.is_empty() || requested == "recommended" || requested == "latest" { selected } else { requested };
     let id = format!("{mc}-{selected}");
+    if let Ok(profile) = generated_profile(mc, root, instance, "forge", Some(selected)) {
+        return Ok(profile);
+    }
     run_installer(&format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{id}/forge-{id}-installer.jar"), root)?;
-    generated_profile(mc, root, instance, "forge")
+    generated_profile(mc, root, instance, "forge", Some(selected))
 }
 
 fn neoforge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<InstalledVersion> {
@@ -145,8 +148,11 @@ fn neoforge(mc: &str, requested: &str, root: &Path, instance: &Path) -> Result<I
     let prefix = mc.strip_prefix("1.").unwrap_or(mc).split('.').take(2).collect::<Vec<_>>().join(".");
     let all = versions.as_array().or_else(|| versions.get("versions").and_then(Value::as_array)).context("NeoForge release list is invalid")?;
     let selected = if requested.is_empty() { all.iter().filter_map(Value::as_str).find(|v| v.starts_with(&format!("{prefix}."))).context("No NeoForge release exists for this Minecraft version")? } else { requested };
+    if let Ok(profile) = generated_profile(mc, root, instance, "neoforge", Some(selected)) {
+        return Ok(profile);
+    }
     run_installer(&format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{selected}/neoforge-{selected}-installer.jar"), root)?;
-    generated_profile(mc, root, instance, "neoforge")
+    generated_profile(mc, root, instance, "neoforge", Some(selected))
 }
 
 
@@ -195,8 +201,14 @@ pub fn prepare_instance(mc: &str, loader: Option<&str>, root: &Path, instance: &
 
 pub fn prepare_modpack(pack: &InstalledPack, root: &Path) -> Result<InstalledVersion> {
     match pack.loaders.iter().next() {
-        Some((kind, version)) if kind == "fabric-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, false),
-        Some((kind, version)) if kind == "quilt-loader" => fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, true),
+        Some((kind, version)) if kind == "fabric-loader" => {
+            if let Ok(profile) = generated_profile(&pack.minecraft, root, &pack.instance, "fabric", Some(version)) { return Ok(profile); }
+            fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, false)
+        }
+        Some((kind, version)) if kind == "quilt-loader" => {
+            if let Ok(profile) = generated_profile(&pack.minecraft, root, &pack.instance, "quilt", Some(version)) { return Ok(profile); }
+            fabric_or_quilt(&pack.minecraft, version, &pack.instance, root, true)
+        }
         Some((kind, version)) if kind == "forge" => forge(&pack.minecraft, version, root, &pack.instance),
         Some((kind, version)) if kind == "neoforge" => neoforge(&pack.minecraft, version, root, &pack.instance),
         _ => { let mut base = if launcher::installed_versions(root)?.contains(&pack.minecraft) { launcher::load_installed(&pack.minecraft, root)? } else { launcher::install(&pack.minecraft, root, |_| {})? }; base.game_directory = Some(pack.instance.clone()); Ok(base) }
