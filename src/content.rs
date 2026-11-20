@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 use std::{collections::{HashMap, HashSet}, fs, io::{Cursor, Read}, path::{Component, Path, PathBuf}};
-use zip::ZipArchive;
+use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 const API: &str = "https://api.modrinth.com/v2";
 
@@ -154,6 +154,49 @@ fn safe_filename(filename: &str) -> Result<&str> {
     Ok(filename)
 }
 
+
+fn normalize_pack_archive(bytes: &[u8], kind: &str) -> Result<Vec<u8>> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))
+        .with_context(|| format!("The downloaded {kind} is not a valid ZIP archive"))?;
+    if archive.is_empty() { bail!("The downloaded {kind} archive contains no files"); }
+    let names = (0..archive.len())
+        .filter_map(|index| archive.by_index(index).ok().map(|file| file.name().to_owned()))
+        .filter(|name| !name.ends_with('/')).collect::<Vec<_>>();
+    let prefix = names.first()
+        .and_then(|first| first.split_once('/').map(|(head, _)| format!("{head}/")))
+        .filter(|prefix| names.iter().all(|name| name.starts_with(prefix)));
+    let strip_prefix = prefix.as_deref().unwrap_or("");
+    let normalized = names.iter()
+        .map(|name| name.strip_prefix(strip_prefix).unwrap_or(name).to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if kind == "resource pack" && !normalized.iter().any(|name| name == "pack.mcmeta") {
+        bail!("This ZIP does not contain pack.mcmeta, so Minecraft cannot recognize it as a resource pack");
+    }
+    if kind == "shader pack" && !normalized.iter().any(|name| name.starts_with("shaders/")) {
+        bail!("This ZIP does not contain a shaders/ folder, so Minecraft cannot recognize it as a shader pack");
+    }
+    if strip_prefix.is_empty() { return Ok(bytes.to_vec()); }
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut output);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for index in 0..archive.len() {
+            let mut file = archive.by_index(index)?;
+            let original = file.name().to_owned();
+            let Some(name) = original.strip_prefix(strip_prefix) else { continue };
+            if name.is_empty() { continue; }
+            if file.is_dir() {
+                writer.add_directory(name, options)?;
+            } else {
+                writer.start_file(name, options)?;
+                std::io::copy(&mut file, &mut writer)?;
+            }
+        }
+        writer.finish()?;
+    }
+    Ok(output.into_inner())
+}
+
 fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, game_version: Option<&str>, loader: Option<&str>) -> Result<String> {
     let versions = project_versions(project_id, game_version, loader)
         .with_context(|| format!("Could not retrieve {kind} versions from Modrinth"))?;
@@ -173,12 +216,7 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
         .bytes()
         .with_context(|| format!("Could not read the {kind} download"))?;
     if bytes.is_empty() { bail!("The downloaded {kind} file was empty"); }
-    if kind != "mod" {
-        let archive = ZipArchive::new(Cursor::new(bytes.as_ref()))
-            .with_context(|| format!("The downloaded {kind} is not a valid ZIP archive"))?;
-        if archive.is_empty() { bail!("The downloaded {kind} archive contains no files"); }
-        drop(archive);
-    }
+    let bytes = if kind == "mod" { bytes.to_vec() } else { normalize_pack_archive(&bytes, kind)? };
     if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
         && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
     {
