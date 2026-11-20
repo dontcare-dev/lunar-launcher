@@ -75,6 +75,7 @@ enum Screen {
     Servers,
     LivePerformance,
     PlayStats,
+    CrashAnalyzer,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -147,6 +148,8 @@ pub struct LunarApp {
     memory_history: Vec<f32>,
     game_cpu_history: Vec<f32>,
     game_memory_history: Vec<f32>,
+    crash_log: String,
+    crash_analysis: Option<String>,
 }
 
 impl LunarApp {
@@ -239,6 +242,8 @@ impl LunarApp {
             memory_history: Vec::with_capacity(120),
             game_cpu_history: Vec::with_capacity(120),
             game_memory_history: Vec::with_capacity(120),
+            crash_log: String::new(),
+            crash_analysis: None,
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -676,7 +681,7 @@ impl LunarApp {
                 });
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                    let navigation: [NavigationItem; 13] = [
+                    let navigation: [NavigationItem; 14] = [
                         ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                         ("Play Stats", Screen::PlayStats, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
@@ -689,6 +694,7 @@ impl LunarApp {
                         ("Shader Manager", Screen::Content, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
                         ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
+                        ("Crash Analyzer", Screen::CrashAnalyzer, "bytes://lunar-shield.svg", include_bytes!("../assets/icons/shield.svg")), 
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -1522,6 +1528,37 @@ impl LunarApp {
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
 
+    fn crash_analyzer_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Crash Analyzer", "Paste a Minecraft crash report or latest.log to identify common launch, Java, loader and mod issues.");
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("CRASH LOG / LATEST.LOG").strong().color(self.accent));
+                if ui.button("Clear").clicked() {
+                    self.crash_log.clear();
+                    self.crash_analysis = None;
+                }
+            });
+            ui.add(egui::TextEdit::multiline(&mut self.crash_log).desired_rows(16).desired_width(f32::INFINITY).hint_text("Paste the crash report or latest.log here..."));
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!self.crash_log.trim().is_empty(), egui::Button::new("Analyze report")).clicked() {
+                    self.crash_analysis = Some(crate::diagnostics::analyze(&self.crash_log));
+                }
+                if ui.button("Copy log").clicked() {
+                    ui.ctx().copy_text(self.crash_log.clone());
+                    self.status = "Crash log copied".into();
+                }
+            });
+        });
+        if let Some(analysis) = &self.crash_analysis {
+            ui.add_space(12.0);
+            ui.group(|ui| {
+                ui.label(RichText::new("ANALYSIS").strong().color(self.accent));
+                ui.label(analysis);
+                ui.label(RichText::new("This checks known log patterns. It is a diagnostic aid, not a guaranteed root-cause detector.").size(10.0).color(Color32::GRAY));
+            });
+        }
+    }
+
     fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Play Stats", "Your Minecraft play history across Lunar Launcher.");
         let total = self.play_stats.total_playtime_seconds;
@@ -1939,6 +1976,7 @@ impl eframe::App for LunarApp {
                             Screen::Content => self.content(ui),
                             Screen::Servers => self.servers(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
+                            Screen::CrashAnalyzer => self.crash_analyzer_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
