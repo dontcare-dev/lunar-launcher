@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "nyxclient",
-  "version": "\${version}",
+  "version": "${version}",
   "name": "Nyx Client",
   "description": "Nyx Client interface and configurable performance controls for Minecraft 26.1.2.",
   "authors": ["Nyx"],
@@ -12,7 +12,7 @@
   ],
   "depends": {
     "fabricloader": ">=0.20.1",
-    "minecraft": "~\${minecraft_version}",
+    "minecraft": "~${minecraft_version}",
     "java": ">=25"
   }
 }
