@@ -404,6 +404,50 @@ fn install_required_mod_dependencies(dependencies: &[VersionDependency], instanc
     Ok(installed)
 }
 
+pub fn resolve_instance_dependencies(instance: &Path, minecraft: &str, loader: &str) -> Result<Vec<String>> {
+    let mods_directory = instance.join("mods");
+    if !mods_directory.exists() { return Ok(Vec::new()); }
+    let http = client()?;
+    let mut dependencies = Vec::new();
+    let mut installed_projects = std::collections::HashSet::new();
+    let mut installed_versions = std::collections::HashSet::new();
+    for entry in fs::read_dir(&mods_directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() { continue; }
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()).is_none_or(|value| !value.eq_ignore_ascii_case("jar")) { continue; }
+        let bytes = fs::read(&path)?;
+        let hash = format!("{:x}", Sha1::digest(&bytes));
+        let response = match http.get(format!("{API}/version_file/{hash}?algorithm=sha1")).send() {
+            Ok(response) if response.status().is_success() => response,
+            _ => continue,
+        };
+        let version = match response.json::<serde_json::Value>() { Ok(value) => value, Err(_) => continue };
+        if let Some(project_id) = version.get("project_id").and_then(serde_json::Value::as_str) {
+            installed_projects.insert(project_id.to_owned());
+        }
+        if let Some(version_id) = version.get("id").and_then(serde_json::Value::as_str) {
+            installed_versions.insert(version_id.to_owned());
+        }
+        if let Some(values) = version.get("dependencies").cloned()
+            && let Ok(mut found) = serde_json::from_value::<Vec<VersionDependency>>(values)
+        {
+            dependencies.append(&mut found);
+        }
+    }
+    let missing = dependencies.into_iter()
+        .filter(|dependency| dependency.dependency_type.as_deref() == Some("required"))
+        .filter(|dependency| {
+            let project = dependency.project_id.as_deref().is_none_or(|id| !installed_projects.contains(id));
+            let version = dependency.version_id.as_deref().is_none_or(|id| !installed_versions.contains(id));
+            project && version
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() { return Ok(Vec::new()); }
+    install_required_mod_dependencies(&missing, instance, minecraft, loader)
+        .context("Lunar found required dependencies but could not resolve all of them")
+}
+
 pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let http = client()?;
     let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
