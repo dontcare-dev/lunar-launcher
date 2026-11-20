@@ -591,6 +591,14 @@ pub fn launch(installed: &InstalledVersion, username: &str, uuid: &str, memory_m
 }
 
 pub fn launch_with_java(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, preferred_java: Option<u32>) -> Result<Child> {
+    launch_with_identity(installed, username, uuid, memory_mb, performance_mode, None, preferred_java)
+}
+
+pub fn launch_with_account(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str) -> Result<Child> {
+    launch_with_identity(installed, &account.name, &account.uuid, memory_mb, performance_mode, Some(account), None)
+}
+
+fn launch_with_identity(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, account: Option<&crust_core::authenticator::Account>, preferred_java: Option<u32>) -> Result<Child> {
     let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
     let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
     let minimum_major = installed.metadata.pointer("/javaVersion/majorVersion").and_then(Value::as_u64).unwrap_or(8) as u32;
@@ -639,12 +647,12 @@ pub fn launch_with_java(installed: &InstalledVersion, username: &str, uuid: &str
         ("${game_assets}", installed.game_assets.to_string_lossy().into_owned()),
         ("${path}", installed.metadata.pointer("/logging/client/file/id").and_then(Value::as_str).map(|id| assets_dir.join("log_configs").join(id).to_string_lossy().into_owned()).unwrap_or_default()),
         ("${auth_uuid}", uuid.to_owned()),
-        ("${auth_access_token}", "0".into()),
-        ("${user_type}", "legacy".into()),
+        ("${auth_access_token}", account.map(|value| value.access_token.clone()).unwrap_or_else(|| "0".into())),
+        ("${user_type}", if account.is_some() { "msa" } else { "legacy" }.into()),
         ("${version_type}", installed.metadata.get("type").and_then(Value::as_str).unwrap_or("release").to_owned()),
-        ("${clientid}", String::new()),
-        ("${auth_xuid}", String::new()),
-        ("${user_properties}", "{}".into()),
+        ("${clientid}", account.and_then(|value| value.client_id.clone()).unwrap_or_default()),
+        ("${auth_xuid}", account.and_then(|value| value.xuid().map(str::to_owned)).unwrap_or_default()),
+        ("${user_properties}", account.map(|value| value.user_properties.clone()).unwrap_or_else(|| "{}".into())),
     ];
     replace_arguments(&mut jvm, &substitutions);
     replace_arguments(&mut game, &substitutions);
