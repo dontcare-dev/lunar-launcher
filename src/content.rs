@@ -206,9 +206,13 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
     Ok(destination.display().to_string())
 }
 
+pub fn nyx_client_supported(minecraft: &str, loader: &str) -> bool {
+    loader == "fabric" && matches!(minecraft, "1.20.1" | "1.21.1")
+}
+
 pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Result<String> {
-    if minecraft != "1.21.1" || loader != "fabric" {
-        bail!("Nyx Client currently supports Minecraft 1.21.1 with Fabric only");
+    if !nyx_client_supported(minecraft, loader) {
+        bail!("No Nyx Client build is published for Minecraft {minecraft} with {loader}. Install a matching Nyx build before enabling it.");
     }
     let http = client()?;
     let releases = http.get("https://api.github.com/repos/dontcare-dev/lunar-launcher/releases?per_page=20")
@@ -216,7 +220,7 @@ pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Res
     let asset_url = releases.iter()
         .filter(|release| release.get("tag_name").and_then(serde_json::Value::as_str).is_some_and(|tag| tag.starts_with("nyx-client-build-")))
         .find_map(|release| release.get("assets").and_then(serde_json::Value::as_array).and_then(|assets| {
-            assets.iter().find(|asset| asset.get("name").and_then(serde_json::Value::as_str) == Some("nyx-client.jar"))
+            assets.iter().find(|asset| asset.get("name").and_then(serde_json::Value::as_str).is_some_and(|name| name.starts_with(&format!("nyx-client-{minecraft}-")) && name.ends_with(".jar")))
                 .and_then(|asset| asset.get("browser_download_url"))
                 .and_then(serde_json::Value::as_str)
         }))
@@ -230,8 +234,16 @@ pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Res
     drop(archive);
     let directory = instance.join("mods");
     fs::create_dir_all(&directory)?;
-    let destination = directory.join("nyx-client.jar");
-    let temporary = directory.join("nyx-client.jar.lunar-download");
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("nyx-client-") && name.ends_with(".jar") {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    let destination = directory.join(format!("nyx-client-{minecraft}.jar"));
+    let temporary = directory.join(format!("nyx-client-{minecraft}.jar.lunar-download"));
     fs::write(&temporary, &bytes)?;
     if destination.exists() {
         fs::remove_file(&destination)?;
