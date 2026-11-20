@@ -5,8 +5,10 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+def targetJava = (project.findProperty("java_version") ?: "21").toInteger()
+
 base {
-    archivesName = "nyx-client"
+    archivesName = "nyx-client-${project.minecraft_version}"
 }
 
 repositories {
@@ -22,25 +24,17 @@ dependencies {
 processResources {
     inputs.property "version", project.version
     filesMatching("fabric.mod.json") {
-        expand "version": project.version
+        expand "version": project.version, "minecraft_version": project.minecraft_version
     }
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.release = 21
+    options.release = targetJava
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.toVersion(targetJava)
+    targetCompatibility = JavaVersion.toVersion(targetJava)
     withSourcesJar()
 }
 
-jar {
-    archiveFileName = "nyx-client.jar"
-}
-
-
-tasks.named("remapJar") {
-    archiveFileName = "nyx-client.jar"
-}
