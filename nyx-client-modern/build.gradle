@@ -3,10 +3,10 @@ plugins {
 }
 version = project.mod_version
 group = project.maven_group
-base { archivesName = "nyx-client-\${project.minecraft_version}" }
+base { archivesName = "nyx-client-${project.minecraft_version}" }
 dependencies {
-    minecraft "com.mojang:minecraft:\${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:\${project.loader_version}"
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 }
 loom {
     splitEnvironmentSourceSets()
