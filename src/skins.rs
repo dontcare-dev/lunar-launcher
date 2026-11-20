@@ -1,13 +1,12 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use std::io::Cursor;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Skin {
     pub id: String,
     #[serde(default)]
     pub name: String,
-    #[serde(default, alias = "author", alias = "publisher")]
+    #[serde(skip)]
     pub creator: String,
     #[serde(default)]
     pub arms: String,
@@ -33,21 +32,18 @@ pub fn search(query: &str) -> Result<Vec<Skin>> {
         ])
         .send()?.error_for_status()?;
     let value: serde_json::Value = response.json()?;
-    let entries = value.as_array()
-        .or_else(|| value.get("skins").and_then(serde_json::Value::as_array))
-        .or_else(|| value.get("data").and_then(|data| data.as_array()))
-        .or_else(|| value.pointer("/data/skins").and_then(serde_json::Value::as_array))
+    let entries = value.get("skins").and_then(serde_json::Value::as_array)
         .context("Skin catalogue returned an unexpected response")?;
     let mut skins = Vec::new();
     for entry in entries {
         let Ok(mut skin) = serde_json::from_value::<Skin>(entry.clone()) else { continue };
         if skin.id.is_empty() { continue; }
-        if skin.creator.is_empty() {
-            skin.creator = entry.pointer("/author/name").or_else(|| entry.pointer("/publisher/name"))
-                .and_then(serde_json::Value::as_str).unwrap_or("Community creator").to_owned();
-        }
+        skin.creator = entry.pointer("/author/name")
+            .or_else(|| entry.pointer("/publisher/name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Community creator").to_owned();
         if skin.page.is_empty() {
-            skin.page = format!("https://mosaicary.com/skins/{}", skin.id);
+            skin.page = format!("https://mosaicary.com/models/{}", skin.id);
         }
         if skin.png.is_empty() {
             skin.png = format!("https://mosaicary.com/api/skins/{}.png", skin.id);
