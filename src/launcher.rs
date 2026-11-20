@@ -594,10 +594,12 @@ pub fn launch_offline_settings(installed: &InstalledVersion, profile: &crate::pr
     launch_with_identity(installed, &profile.name, &profile.uuid, memory_mb, performance_mode, None, preferred_java, custom_jvm_arguments)
 }
 
+#[allow(dead_code)]
 pub fn launch_with_account(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str) -> Result<Child> {
     launch_with_account_settings(installed, account, memory_mb, performance_mode, None, "")
 }
 
+#[allow(dead_code)]
 pub fn launch_with_account_settings(installed: &InstalledVersion, account: &crust_core::authenticator::Account, memory_mb: u32, performance_mode: &str, preferred_java: Option<u32>, custom_jvm_arguments: &str) -> Result<Child> {
     launch_with_identity(installed, &account.name, &account.uuid, memory_mb, performance_mode, Some(account), preferred_java, custom_jvm_arguments)
 }
