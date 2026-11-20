@@ -87,6 +87,20 @@ type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
 type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 type SkinTexturedFace = (f32, [egui::Pos2; 4], (u32, u32, u32, u32));
+fn skin_uv_regions(part: &str, outer: bool) -> &'static [(u32, u32, u32, u32)] {
+    const ALL: &[(u32, u32, u32, u32)] = &[(0, 0, 64, 64)];
+    const HEAD: &[(u32, u32, u32, u32)] = &[(0, 0, 32, 16)];
+    const BODY: &[(u32, u32, u32, u32)] = &[(16, 16, 24, 16)];
+    const ARMS: &[(u32, u32, u32, u32)] = &[(40, 16, 16, 16), (32, 48, 16, 16)];
+    const LEGS: &[(u32, u32, u32, u32)] = &[(0, 16, 16, 16), (16, 48, 16, 16)];
+    const HEAD_OUTER: &[(u32, u32, u32, u32)] = &[(32, 0, 32, 16)];
+    const BODY_OUTER: &[(u32, u32, u32, u32)] = &[(16, 32, 24, 16)];
+    const ARMS_OUTER: &[(u32, u32, u32, u32)] = &[(40, 32, 16, 16), (48, 48, 16, 16)];
+    const LEGS_OUTER: &[(u32, u32, u32, u32)] = &[(0, 32, 16, 16), (0, 48, 16, 16)];
+    if !outer { match part { "Head" => HEAD, "Body" => BODY, "Arms" => ARMS, "Legs" => LEGS, _ => ALL } }
+    else { match part { "Head" => HEAD_OUTER, "Body" => BODY_OUTER, "Arms" => ARMS_OUTER, "Legs" => LEGS_OUTER, _ => ALL } }
+}
+
 
 enum MicrosoftLoginEvent {
     DeviceCode { code: String, url: String },
@@ -174,6 +188,7 @@ pub struct LunarApp {
     skin_rotation: f32,
     skin_preview_texture: Option<egui::TextureHandle>,
     skin_overlay_layer: bool,
+    skin_selected_part: String,
     skin_selected_part: String,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
@@ -286,6 +301,7 @@ impl LunarApp {
             skin_rotation: 0.45,
             skin_preview_texture: None,
             skin_overlay_layer: false,
+            skin_selected_part: "All".into(),
             skin_selected_part: "All".into(),
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
@@ -2142,6 +2158,9 @@ impl LunarApp {
             ui.add_enabled_ui(self.skin_editor.as_ref().is_some_and(|skin| skin.height() >= 64), |ui| {
                 ui.selectable_value(&mut self.skin_overlay_layer, true, "Outer layer");
             });
+            egui::ComboBox::from_id_salt("skin_body_part").selected_text(format!("Paint: {}", self.skin_selected_part)).show_ui(ui, |ui| {
+                for part in ["All", "Head", "Body", "Arms", "Legs"] { ui.selectable_value(&mut self.skin_selected_part, part.to_owned(), part); }
+            });
             if ui.button("Import PNG").clicked()
                 && let Some(source) = Self::choose_content_file("skin")
             {
@@ -2200,23 +2219,16 @@ impl LunarApp {
                     let scale_y = (height / 64).max(1);
                     let base_x = x / scale_x;
                     let base_y = y / scale_y;
-                    let overlay_regions = [
-                        (40, 8, 8, 8),
-                        (20, 36, 8, 12),
-                        (44, 36, 4, 12),
-                        (52, 52, 4, 12),
-                        (4, 36, 4, 12),
-                        (4, 52, 4, 12),
-                    ];
-                    let in_overlay = overlay_regions.iter().any(|(rx, ry, rw, rh)| {
+                    let allowed_regions = skin_uv_regions(&self.skin_selected_part, self.skin_overlay_layer);
+                    let in_selected_region = allowed_regions.iter().any(|(rx, ry, rw, rh)| {
                         base_x >= *rx && base_x < *rx + *rw && base_y >= *ry && base_y < *ry + *rh
                     });
-                    if !self.skin_overlay_layer || in_overlay {
+                    if in_selected_region {
                         skin.put_pixel(x, y, image::Rgba([self.skin_color.r(), self.skin_color.g(), self.skin_color.b(), self.skin_color.a()]));
                     }
                 }
             }
-            ui.label(RichText::new(format!("{} × {} skin texture · {} · tap or drag to paint", width, height, if self.skin_overlay_layer { "outer layer UV regions" } else { "base texture" })).size(11.0).color(Color32::GRAY));
+            ui.label(RichText::new(format!("{} × {} skin texture · {} · {} · tap or drag to paint", width, height, if self.skin_overlay_layer { "outer layer" } else { "base layer" }, self.skin_selected_part)).size(11.0).color(Color32::GRAY));
             ui.horizontal_wrapped(|ui| {
                 save_requested = ui.button("Save skin").clicked();
                 reload_requested = ui.button("Undo changes / reload").clicked();
