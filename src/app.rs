@@ -171,6 +171,10 @@ pub struct LunarApp {
     skin_overlay_layer: bool,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
+    active_install_task: Option<u64>,
+    active_content_task: Option<u64>,
+    active_java_task: Option<u64>,
+    active_modpack_task: Option<u64>,
 }
 
 impl LunarApp {
@@ -276,6 +280,10 @@ impl LunarApp {
             skin_overlay_layer: false,
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
+            active_install_task: None,
+            active_content_task: None,
+            active_java_task: None,
+            active_modpack_task: None,
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -652,6 +660,7 @@ impl LunarApp {
             let instance = root.join("instances").join(format!("sodium-{minecraft}"));
             let (tx, rx) = mpsc::channel();
             self.modpack_launch_rx = Some(rx);
+            self.active_modpack_task = Some(self.downloads.begin_operation(&format!("Prepare Fabric + Sodium · {minecraft}"), instance.clone()));
             self.status = format!("Preparing Fabric + Sodium for Minecraft {minecraft}…");
             std::thread::spawn(move || {
                 let result = (|| -> anyhow::Result<InstalledVersion> {
@@ -947,6 +956,7 @@ impl LunarApp {
                     let instance = root.join("loader-profiles").join(format!("{minecraft}-{loader}"));
                     let (tx, rx) = mpsc::channel();
                     self.install_rx = Some(rx);
+                    self.active_install_task = Some(self.downloads.begin_operation(&format!("Install {loader} · Minecraft {minecraft}"), instance.clone()));
                     self.content_busy = true;
                     self.status = format!("Installing {loader} for Minecraft {minecraft}…");
                     std::thread::spawn(move || {
@@ -1283,6 +1293,7 @@ impl LunarApp {
                     let instance = root.join("instances").join(format!("sodium-{minecraft}"));
                     let (tx, rx) = mpsc::channel();
                     self.install_rx = Some(rx);
+                    self.active_install_task = Some(self.downloads.begin_operation(&format!("Install Fabric + Sodium · {minecraft}"), instance.clone()));
                     self.content_busy = true;
                     self.status = "Installing Fabric and Sodium…".into();
                     std::thread::spawn(move || {
@@ -1339,6 +1350,7 @@ impl LunarApp {
                 let root = self.game_root.clone();
                 let (tx, rx) = mpsc::channel();
                 self.content_install_rx = Some(rx);
+                self.active_content_task = Some(self.downloads.begin_operation("Import Modrinth modpack", root.clone()));
                 self.content_busy = true;
                 self.status = format!("Importing {}…", source.file_name().unwrap_or_default().to_string_lossy());
                 std::thread::spawn(move || {
@@ -1472,6 +1484,7 @@ impl LunarApp {
                                     .map(|entry| crate::workspace::instance_path(&self.game_root, entry));
                                 let (tx, rx) = mpsc::channel();
                                 self.content_install_rx = Some(rx);
+                                self.active_content_task = Some(self.downloads.begin_operation("Install Modrinth content", root.clone()));
                                 self.content_busy = true;
                                 self.status = format!("Installing {}…", project.title);
                                 std::thread::spawn(move || {
@@ -1530,6 +1543,7 @@ impl LunarApp {
                                 .unwrap_or_else(|| "fabric".to_owned());
                             let (tx, rx) = mpsc::channel();
                             self.content_install_rx = Some(rx);
+                            self.active_content_task = Some(self.downloads.begin_operation("Resolve required mod dependencies", instance.clone()));
                             self.content_busy = true;
                             self.status = format!("Checking required dependencies for {}…", pack.name);
                             std::thread::spawn(move || {
@@ -1551,6 +1565,7 @@ impl LunarApp {
                                 .unwrap_or_else(|| "fabric".to_owned());
                             let (tx, rx) = mpsc::channel();
                             self.content_install_rx = Some(rx);
+                            self.active_content_task = Some(self.downloads.begin_operation("Scan mod compatibility", instance.clone()));
                             self.content_busy = true;
                             self.status = format!("Inspecting installed mod metadata for {}…", pack.name);
                             std::thread::spawn(move || {
@@ -1565,6 +1580,7 @@ impl LunarApp {
                                 let root = self.game_root.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.modpack_launch_rx = Some(rx);
+                                self.active_modpack_task = Some(self.downloads.begin_operation("Prepare modpack instance", root.clone()));
                                 self.status = format!("Preparing {}…", pack.name);
                                 std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
                             } else { self.status = "Sign in with Microsoft to launch a modpack".into(); }
@@ -2369,6 +2385,7 @@ impl LunarApp {
                         let root = self.game_root.clone();
                         let (tx, rx) = mpsc::channel();
                         self.java_install_rx = Some(rx);
+                        self.active_java_task = Some(self.downloads.begin_operation(&format!("Install Java {major}"), root.clone()));
                         self.status = format!("Installing Java {major}…");
                         std::thread::spawn(move || { let result = crate::runtime::install_java(major, &root).map(|path| path.display().to_string()).map_err(|error| format!("{error:#}")); let _ = tx.send(result); });
                     }
