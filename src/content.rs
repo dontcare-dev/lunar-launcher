@@ -233,6 +233,9 @@ pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Res
     let destination = directory.join("nyx-client.jar");
     let temporary = directory.join("nyx-client.jar.lunar-download");
     fs::write(&temporary, &bytes)?;
+    if destination.exists() {
+        fs::remove_file(&destination)?;
+    }
     if let Err(error) = fs::rename(&temporary, &destination) {
         let _ = fs::remove_file(&temporary);
         return Err(error.into());
