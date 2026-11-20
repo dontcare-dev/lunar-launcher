@@ -75,7 +75,7 @@ enum Screen {
     Servers,
     LivePerformance,
     PlayStats,
-    CrashAnalyzer,
+    SkinManager,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -148,8 +148,6 @@ pub struct LunarApp {
     memory_history: Vec<f32>,
     game_cpu_history: Vec<f32>,
     game_memory_history: Vec<f32>,
-    crash_log: String,
-    crash_analysis: Option<String>,
 }
 
 impl LunarApp {
@@ -242,8 +240,6 @@ impl LunarApp {
             memory_history: Vec::with_capacity(120),
             game_cpu_history: Vec::with_capacity(120),
             game_memory_history: Vec::with_capacity(120),
-            crash_log: String::new(),
-            crash_analysis: None,
         };
         app.refresh_versions();
         let (content_tx, content_rx) = mpsc::channel();
@@ -694,7 +690,7 @@ impl LunarApp {
                         ("Shader Manager", Screen::Content, "bytes://lunar-shaders.svg", include_bytes!("../assets/icons/shaders.svg")),
                         ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
-                        ("Crash Analyzer", Screen::CrashAnalyzer, "bytes://lunar-shield.svg", include_bytes!("../assets/icons/shield.svg")), 
+                        ("Skin Manager", Screen::SkinManager, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -1431,7 +1427,7 @@ impl LunarApp {
     }
 
     fn live_performance_manager(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Live Performance Manager", "Real-time system and Minecraft telemetry, with launcher-side performance controls.");
+        Self::heading(ui, "Live Performance Manager", "A live view of what Minecraft and your system are actually using.");
 
         let cpu = self.system_monitor.global_cpu_usage().clamp(0.0, 100.0);
         let total_memory = self.system_monitor.total_memory() / 1024 / 1024;
@@ -1439,7 +1435,7 @@ impl LunarApp {
         let memory_percent = if total_memory > 0 { used_memory as f32 / total_memory as f32 * 100.0 } else { 0.0 };
         let game_metrics = self.game_process.as_ref().and_then(|process| {
             self.system_monitor.process(sysinfo::Pid::from_u32(process.id())).map(|game| (
-                game.cpu_usage(),
+                game.cpu_usage().clamp(0.0, 100.0),
                 game.memory() / 1024 / 1024,
                 process.id(),
             ))
@@ -1448,51 +1444,47 @@ impl LunarApp {
         ui.horizontal_wrapped(|ui| {
             for (label, value, detail) in [
                 ("SYSTEM CPU", format!("{cpu:.0}%"), format!("{} logical threads", self.system_monitor.cpus().len())),
-                ("SYSTEM MEMORY", format!("{memory_percent:.0}%"), format!("{used_memory} / {total_memory} MB")),
-                ("JAVA PROCESS", game_metrics.as_ref().map(|m| format!("{:.1}% CPU", m.0)).unwrap_or_else(|| "Not running".into()), game_metrics.as_ref().map(|m| format!("{} MB RAM", m.1)).unwrap_or_else(|| "Launch Minecraft to monitor".into())),
+                ("SYSTEM RAM", format!("{used_memory} MB"), format!("{memory_percent:.0}% of {total_memory} MB")),
+                ("MINECRAFT RAM", game_metrics.as_ref().map(|m| format!("{} MB", m.1)).unwrap_or_else(|| "Offline".into()), game_metrics.as_ref().map(|m| format!("Java PID {}", m.2)).unwrap_or_else(|| "Launch Minecraft to monitor".into())),
             ] {
                 egui::Frame::group(ui.style())
-                    .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 190))
-                    .corner_radius(egui::CornerRadius::same(13))
+                    .fill(Color32::from_rgba_unmultiplied(22, 30, 49, 205))
+                    .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(self.accent.r(), self.accent.g(), self.accent.b(), 90)))
+                    .corner_radius(egui::CornerRadius::same(14))
                     .inner_margin(egui::Margin::same(16))
                     .show(ui, |ui| {
                         ui.set_min_width(170.0);
                         ui.label(RichText::new(label).size(10.0).strong().color(self.accent));
                         ui.label(RichText::new(value).size(25.0).strong());
-                        ui.label(RichText::new(detail).size(11.0).color(Color32::GRAY));
+                        ui.label(RichText::new(detail).size(10.0).color(Color32::GRAY));
                     });
             }
         });
 
-        ui.add_space(16.0);
+        ui.add_space(12.0);
         ui.columns(2, |columns| {
-            Self::performance_history_chart(&mut columns[0], "SYSTEM CPU · LAST 2 MINUTES", &self.cpu_history, self.accent);
-            Self::performance_history_chart(&mut columns[1], "SYSTEM RAM · LAST 2 MINUTES", &self.memory_history, self.accent);
-        });
-        ui.add_space(8.0);
-        ui.columns(2, |columns| {
-            Self::performance_history_chart(&mut columns[0], "MINECRAFT CPU · LAST 2 MINUTES", &self.game_cpu_history, self.accent);
-            Self::performance_history_chart(&mut columns[1], "MINECRAFT RAM · % OF SYSTEM MEMORY", &self.game_memory_history, self.accent);
+            columns[0].group(|ui| {
+                ui.label(RichText::new("SYSTEM LOAD").strong().color(self.accent));
+                ui.add(egui::ProgressBar::new(cpu / 100.0).text(format!("CPU · {cpu:.0}%")));
+                ui.add(egui::ProgressBar::new(memory_percent / 100.0).text(format!("RAM · {memory_percent:.0}%")));
+                ui.label(RichText::new(format!("{} logical CPU threads · {} MB total memory", self.system_monitor.cpus().len(), total_memory)).size(10.0).color(Color32::GRAY));
+            });
+            columns[1].group(|ui| {
+                ui.label(RichText::new("MINECRAFT PROCESS").strong().color(self.accent));
+                if let Some((game_cpu, game_memory, pid)) = game_metrics {
+                    ui.label(RichText::new(format!("{game_cpu:.1}% CPU")).size(22.0).strong());
+                    ui.label(format!("{game_memory} MB working memory"));
+                    ui.label(RichText::new(format!("Process ID {pid}")).size(10.0).color(Color32::GRAY));
+                    ui.add(egui::ProgressBar::new((game_cpu / 100.0).clamp(0.0, 1.0)).text("Process CPU"));
+                } else {
+                    ui.label("Minecraft is not running through Lunar right now.");
+                }
+            });
         });
 
         ui.add_space(12.0);
         ui.group(|ui| {
-            ui.label(RichText::new("MINECRAFT PROCESS").strong().color(self.accent));
-            if let Some((game_cpu, game_memory, pid)) = game_metrics {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("CPU: {game_cpu:.1}%"));
-                    ui.label(format!("Memory: {game_memory} MB"));
-                    ui.label(format!("Process ID: {pid}"));
-                });
-                ui.add(egui::ProgressBar::new((game_cpu / 100.0).clamp(0.0, 1.0)).text("Process CPU"));
-            } else {
-                ui.label("Minecraft is not currently running. Launch a game to see its live CPU and memory usage.");
-            }
-        });
-
-        ui.add_space(12.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("LAUNCH PERFORMANCE PROFILE").strong().color(self.accent));
+            ui.label(RichText::new("LAUNCH PROFILE").strong().color(self.accent));
             ui.horizontal_wrapped(|ui| {
                 egui::ComboBox::from_id_salt("live_performance_profile")
                     .selected_text(&self.performance_mode)
@@ -1502,69 +1494,101 @@ impl LunarApp {
                         ui.selectable_value(&mut self.performance_mode, "Balanced".into(), "Balanced");
                         ui.selectable_value(&mut self.performance_mode, "Custom".into(), "Custom");
                     });
-                if ui.button("Apply recommended profile").clicked() {
+                if ui.button("Use recommended").clicked() {
                     self.performance_mode = "Performance".into();
                     self.memory_mb = self.memory_mb.clamp(2048, 8192);
-                    self.status = "Performance launch profile selected".into();
+                    self.status = "Recommended launch profile selected for the next session".into();
                 }
             });
-            ui.label("These settings are applied when the next Minecraft session launches; they do not change settings inside an active game.");
-            ui.label(RichText::new(format!("Default Java memory allocation: {} MB", self.memory_mb)).size(11.0).color(Color32::GRAY));
-            if ui.add(egui::Slider::new(&mut self.memory_mb, 2048..=8192).step_by(512.0).suffix(" MB")).changed() {
-                self.status = format!("Default launch memory set to {} MB", self.memory_mb);
-            }
-            if ui.button("Save performance settings").clicked() {
-                LauncherPreferences {
-                    memory_mb: self.memory_mb,
-                    snapshots: self.snapshots,
-                    background_gif: self.background_gif.clone(),
-                    performance_mode: self.performance_mode.clone(),
-                    auto_sodium: self.auto_sodium,
-                    animations_enabled: self.animations_enabled,
-                    accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()],
-                }.save();
-                self.status = "Performance settings saved".into();
-            }
+            ui.add(egui::Slider::new(&mut self.memory_mb, 2048..=8192).step_by(512.0).suffix(" MB"));
+            ui.horizontal(|ui| {
+                if ui.button("Save changes").clicked() {
+                    LauncherPreferences {
+                        memory_mb: self.memory_mb,
+                        snapshots: self.snapshots,
+                        background_gif: self.background_gif.clone(),
+                        performance_mode: self.performance_mode.clone(),
+                        auto_sodium: self.auto_sodium,
+                        animations_enabled: self.animations_enabled,
+                        accent_rgb: [self.accent.r(), self.accent.g(), self.accent.b()],
+                    }.save();
+                    self.status = "Performance profile saved".into();
+                }
+            });
+            ui.label(RichText::new("Changes apply on the next launch. Memory allocation is a maximum heap limit, not a direct FPS setting.").size(10.0).color(Color32::GRAY));
         });
 
-        ui.add_space(12.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("TELEMETRY LIMITS").strong().color(self.accent));
-            ui.label("System CPU and RAM plus the launched Minecraft process are measured locally. In-game FPS, server ping, GPU load and frame-time require game-side or hardware-specific telemetry and are not fabricated here.");
-            ui.label(RichText::new("Metrics refresh once per second · 120-point history · local only").size(10.0).color(Color32::GRAY));
-        });
+        ui.add_space(10.0);
+        egui::CollapsingHeader::new("Recent system and Minecraft history")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.columns(2, |columns| {
+                    Self::performance_history_chart(&mut columns[0], "SYSTEM CPU", &self.cpu_history, self.accent);
+                    Self::performance_history_chart(&mut columns[1], "SYSTEM RAM", &self.memory_history, self.accent);
+                });
+                ui.columns(2, |columns| {
+                    Self::performance_history_chart(&mut columns[0], "MINECRAFT CPU", &self.game_cpu_history, self.accent);
+                    Self::performance_history_chart(&mut columns[1], "MINECRAFT RAM", &self.game_memory_history, self.accent);
+                });
+            });
+        ui.label(RichText::new("Lunar measures CPU and memory locally. FPS, GPU utilization, frame-time and server ping are not reported unless a game-side or hardware telemetry source is available.").size(10.0).color(Color32::GRAY));
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
 
-    fn crash_analyzer_ui(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Crash Analyzer", "Paste a Minecraft crash report or latest.log to identify common launch, Java, loader and mod issues.");
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("CRASH LOG / LATEST.LOG").strong().color(self.accent));
-                if ui.button("Clear").clicked() {
-                    self.crash_log.clear();
-                    self.crash_analysis = None;
-                }
-            });
-            ui.add(egui::TextEdit::multiline(&mut self.crash_log).desired_rows(16).desired_width(f32::INFINITY).hint_text("Paste the crash report or latest.log here..."));
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!self.crash_log.trim().is_empty(), egui::Button::new("Analyze report")).clicked() {
-                    self.crash_analysis = Some(crate::diagnostics::analyze(&self.crash_log));
-                }
-                if ui.button("Copy log").clicked() {
-                    ui.ctx().copy_text(self.crash_log.clone());
-                    self.status = "Crash log copied".into();
-                }
-            });
-        });
-        if let Some(analysis) = &self.crash_analysis {
-            ui.add_space(12.0);
-            ui.group(|ui| {
-                ui.label(RichText::new("ANALYSIS").strong().color(self.accent));
-                ui.label(analysis);
-                ui.label(RichText::new("This checks known log patterns. It is a diagnostic aid, not a guaranteed root-cause detector.").size(10.0).color(Color32::GRAY));
-            });
+    fn skin_manager_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Skin Manager", "Manage local skins for your offline Minecraft profile.");
+        let selected = self.profiles.selected.clone().unwrap_or_default();
+        if selected.is_empty() {
+            ui.label(RichText::new("Create or select an offline profile before importing a skin.").color(Color32::LIGHT_RED));
+            return;
         }
+        let skin_dir = self.game_root.join("CustomSkinLoader").join("LocalSkin").join("skins");
+        let skin_path = skin_dir.join(format!("{selected}.png"));
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(RichText::new("ACTIVE OFFLINE PROFILE").size(10.0).strong().color(self.accent));
+            ui.label(RichText::new(&selected).size(24.0).strong());
+            ui.add_space(8.0);
+            if skin_path.exists() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("LOCAL SKIN").strong());
+                    ui.label(RichText::new("Installed").color(Color32::from_rgb(112, 224, 185)));
+                });
+                ui.label(skin_path.display().to_string());
+                if ui.button("Remove skin").clicked() {
+                    match fs::remove_file(&skin_path) {
+                        Ok(()) => self.status = format!("Removed the local skin for {selected}"),
+                        Err(error) => self.status = format!("Could not remove skin: {error}"),
+                    }
+                }
+            } else {
+                ui.label(RichText::new("No local skin assigned").color(Color32::GRAY));
+            }
+            ui.add_space(10.0);
+            if ui.button("Import PNG skin").clicked() {
+                if let Some(source) = Self::choose_content_file("skin") {
+                    let result = (|| -> anyhow::Result<()> {
+                        let image = image::open(&source)?;
+                        let (width, height) = (image.width(), image.height());
+                        let valid = (width == height && width >= 64 && width % 64 == 0)
+                            || (width == height * 2 && width % 64 == 0 && height % 32 == 0);
+                        if !valid {
+                            anyhow::bail!("Skin must use a Minecraft skin layout such as 64×64 or 64×32 (HD multiples are supported)");
+                        }
+                        fs::create_dir_all(&skin_dir)?;
+                        fs::copy(&source, &skin_path)?;
+                        Ok(())
+                    })();
+                    self.status = result.map(|_| format!("Skin imported for {selected}. Restart Minecraft to load it."))
+                        .unwrap_or_else(|error| format!("Skin import failed: {error:#}"));
+                }
+            }
+        });
+        ui.add_space(10.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("IN-GAME REQUIREMENT").strong().color(self.accent));
+            ui.label("Offline profiles cannot upload a skin to Mojang. To display this local skin in Minecraft, install the client-side CustomSkinLoader mod in the instance. Lunar stores the PNG in its LocalSkin folder using your exact offline profile name.");
+            ui.label(RichText::new("The imported file is local and is not uploaded. Restart Minecraft after changing it. Other players will only see the skin if their setup also supports the same local skin source.").size(11.0).color(Color32::GRAY));
+        });
     }
 
     fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
@@ -1636,6 +1660,7 @@ impl LunarApp {
             "mod" => ("*.jar", "Minecraft mod (*.jar)"),
             "modpack" => ("*.mrpack", "Modrinth modpack (*.mrpack)"),
             "resourcepack" | "shader" | "archive" => ("*.zip", "ZIP archive (*.zip)"),
+            "skin" => ("*.png", "Minecraft skin PNG (*.png)"),
             _ => return None,
         };
         let output = if cfg!(target_os = "windows") {
@@ -1984,7 +2009,7 @@ impl eframe::App for LunarApp {
                             Screen::Content => self.content(ui),
                             Screen::Servers => self.servers(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
-                            Screen::CrashAnalyzer => self.crash_analyzer_ui(ui),
+                            Screen::SkinManager => self.skin_manager_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
