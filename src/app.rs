@@ -586,13 +586,19 @@ impl LunarApp {
     }
 
     fn launch_selected(&mut self) {
-        let Some(name) = self.profiles.selected.clone() else {
-            self.status = "Create or select an offline profile first".into();
-            return;
-        };
-        let Some(profile) = self.profiles.profiles.iter().find(|profile| profile.name == name) else {
-            self.status = "Selected offline profile could not be found".into();
-            return;
+        let microsoft_account = self.microsoft_account.clone();
+        let offline_profile = if microsoft_account.is_none() {
+            let Some(name) = self.profiles.selected.clone() else {
+                self.status = "Sign in with Microsoft or select an offline profile first".into();
+                return;
+            };
+            let Some(profile) = self.profiles.profiles.iter().find(|profile| profile.name == name).cloned() else {
+                self.status = "Selected offline profile could not be found".into();
+                return;
+            };
+            Some(profile)
+        } else {
+            None
         };
         let installed = match self.installed_version.clone() {
             Some(installed) if installed.id == self.selected_version => installed,
@@ -621,7 +627,14 @@ impl LunarApp {
             });
             return;
         }
-        match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
+        let launch_result = if let Some(account) = microsoft_account.as_ref() {
+            launcher::launch_with_account(&installed, account, self.memory_mb, &self.performance_mode)
+        } else if let Some(profile) = offline_profile.as_ref() {
+            launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode)
+        } else {
+            return;
+        };
+        match launch_result {
             Ok(process) => {
                 self.installed_version = Some(installed.clone());
                 self.game_process = Some(process);
@@ -1013,10 +1026,10 @@ impl LunarApp {
         Self::heading(ui, "Profiles", "Choose a Microsoft account or a local offline profile.");
         ui.group(|ui| {
             ui.label(RichText::new("MICROSOFT ACCOUNT").size(10.0).color(self.accent).strong());
-            if let Some(account) = &self.microsoft_account {
+            if let Some(account_name) = self.microsoft_account.as_ref().map(|account| account.name.clone()) {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&account.name).size(17.0).strong());
+                        ui.label(RichText::new(account_name).size(17.0).strong());
                         ui.label(RichText::new("Microsoft authenticated · Minecraft Java profile").size(11.0).color(Color32::GRAY));
                     });
                     if ui.button("Sign out").clicked() {
