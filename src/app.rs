@@ -1893,6 +1893,9 @@ impl LunarApp {
             ui.label("Brush colour");
         });
         ui.add_space(8.0);
+        let mut save_requested = false;
+        let mut reload_requested = false;
+        let mut remove_requested = false;
         if let Some(skin) = self.skin_editor.as_mut() {
             let (width, height) = skin.dimensions();
             let canvas_size = 384.0_f32;
@@ -1920,33 +1923,36 @@ impl LunarApp {
             }
             ui.label(RichText::new(format!("{} × {} skin texture · tap or drag to paint pixels", width, height)).size(11.0).color(Color32::GRAY));
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Save skin").clicked() {
-                    let result = (|| -> anyhow::Result<()> {
-                        fs::create_dir_all(&skin_dir)?;
-                        skin.save(&skin_path)?;
-                        Ok(())
-                    })();
-                    self.status = result.map(|_| format!("Custom skin saved for {selected}"))
-                        .unwrap_or_else(|error| format!("Could not save skin: {error:#}"));
-                }
-                if ui.button("Undo changes / reload").clicked() {
-                    self.skin_editor = image::open(&skin_path).ok().map(|image| image.to_rgba8());
-                }
+                save_requested = ui.button("Save skin").clicked();
+                reload_requested = ui.button("Undo changes / reload").clicked();
                 if ui.button("Clear editor").clicked() {
                     *skin = image::RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
                 }
-                if ui.button("Remove saved skin").clicked() {
-                    match fs::remove_file(&skin_path) {
-                        Ok(()) => { self.skin_editor = None; self.status = "Saved skin removed".into(); }
-                        Err(error) => self.status = format!("Could not remove skin: {error}"),
-                    }
-                }
+                remove_requested = ui.button("Remove saved skin").clicked();
             });
         } else {
             ui.group(|ui| {
                 ui.label(RichText::new("YOUR SKIN WORKSPACE").strong().color(self.accent));
                 ui.label("Import a PNG skin or start with a blank 64×64 canvas. Paint directly on the texture, then save it to this profile.");
             });
+        }
+        if save_requested {
+            let result = (|| -> anyhow::Result<()> {
+                fs::create_dir_all(&skin_dir)?;
+                self.skin_editor.as_ref().context("No skin is open in the editor")?.save(&skin_path)?;
+                Ok(())
+            })();
+            self.status = result.map(|_| format!("Custom skin saved for {selected}"))
+                .unwrap_or_else(|error| format!("Could not save skin: {error:#}"));
+        }
+        if reload_requested {
+            self.skin_editor = image::open(&skin_path).ok().map(|image| image.to_rgba8());
+        }
+        if remove_requested {
+            match fs::remove_file(&skin_path) {
+                Ok(()) => { self.skin_editor = None; self.status = "Saved skin removed".into(); }
+                Err(error) => self.status = format!("Could not remove skin: {error}"),
+            }
         }
         ui.add_space(12.0);
         ui.group(|ui| {
