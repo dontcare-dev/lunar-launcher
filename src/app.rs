@@ -1957,21 +1957,18 @@ impl LunarApp {
 
     fn credits_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Credits", "The person behind Lunar Launcher.");
-        if let Some(rx) = &self.lanyard_rx {
+        if let Some(rx) = self.lanyard_rx.take() {
             match rx.try_recv() {
                 Ok(Ok((name, avatar, status, activities))) => {
                     let texture = avatar.map(|image| ui.ctx().load_texture("lanyard-discord-avatar", image, egui::TextureOptions::LINEAR));
                     self.lanyard_profile = Some((name, texture, status, activities));
-                    self.lanyard_rx = None;
                 }
                 Ok(Err(error)) => {
                     self.status = format!("Lanyard profile unavailable: {error}");
-                    self.lanyard_rx = None;
                 }
-                Err(TryRecvError::Disconnected) => {
-                    self.lanyard_rx = None;
-                }
+                Err(TryRecvError::Disconnected) => {}
                 Err(TryRecvError::Empty) => {
+                    self.lanyard_rx = Some(rx);
                     ui.ctx().request_repaint_after(Duration::from_millis(500));
                 }
             }
