@@ -93,9 +93,7 @@ pub fn mark_project_installed(root: &Path, kind: &str, project_id: &str) -> Resu
     if !ids.iter().any(|value| value.as_str() == Some(project_id)) {
         ids.push(serde_json::json!(project_id));
     }
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec_pretty(&registry)?)?;
-    fs::rename(temporary, path)?;
+    fs::write(path, serde_json::to_vec_pretty(&registry)?)?;
     Ok(())
 }
 
