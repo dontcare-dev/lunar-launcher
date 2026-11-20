@@ -537,7 +537,7 @@ fn apply_performance_options(game_dir: &Path, mode: &str) -> Result<()> {
             ("graphics", "fast"),
             ("renderDistance", "3"),
             ("simulationDistance", "3"),
-            ("maxFps", "120"),
+            ("maxFps", "260"),
             ("enableVsync", "false"),
             ("particles", "2"),
             ("clouds", "0"),
@@ -814,15 +814,15 @@ mod tests {
     }
 
     #[test]
-    fn custom_performance_mode_sets_three_chunks_and_preserves_other_options() {
+    fn custom_performance_mode_preserves_video_settings_and_other_options() {
         let root = std::env::temp_dir().join(format!("lunar-custom-performance-test-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("options.txt");
         fs::write(&path, "renderDistance:12\nsimulationDistance:8\ngamma:1.0\n").unwrap();
         apply_performance_options(&root, "Custom").unwrap();
         let options = fs::read_to_string(&path).unwrap();
-        assert!(options.contains("renderDistance:3"));
-        assert!(options.contains("simulationDistance:3"));
+        assert!(options.contains("renderDistance:12"));
+        assert!(options.contains("simulationDistance:8"));
         assert!(options.contains("gamma:1.0"));
         let _ = fs::remove_dir_all(root);
     }
