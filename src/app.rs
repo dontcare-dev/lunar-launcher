@@ -195,6 +195,10 @@ pub struct LunarApp {
     active_content_task: Option<u64>,
     active_java_task: Option<u64>,
     active_modpack_task: Option<u64>,
+    skin_catalogue_query: String,
+    skin_catalogue_results: Vec<crate::skins::Skin>,
+    skin_catalogue_rx: Option<Receiver<Result<Vec<crate::skins::Skin>, String>>>,
+    skin_catalogue_busy: bool,
 }
 
 impl LunarApp {
@@ -307,6 +311,10 @@ impl LunarApp {
             active_content_task: None,
             active_java_task: None,
             active_modpack_task: None,
+            skin_catalogue_query: String::new(),
+            skin_catalogue_results: Vec::new(),
+            skin_catalogue_rx: None,
+            skin_catalogue_busy: false,
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -1904,9 +1912,10 @@ impl LunarApp {
                 let url_width = (ui.available_width() - 116.0).max(120.0);
                 ui.add_sized([url_width, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste an HTTPS download URL"));
                 if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Download")).clicked() {
-                    match self.downloads.enqueue(self.download_url.trim(), self.game_root.join("downloads")) {
+                    match self.downloads.enqueue_routed(self.download_url.trim(), self.game_root.clone()) {
                         Ok(id) => {
-                            self.status = format!("Download #{id} queued");
+                            let destination = self.downloads.tasks().iter().find(|task| task.id == id).map(|task| task.destination.display().to_string()).unwrap_or_default();
+                            self.status = format!("Download #{id} routed to {destination}");
                             self.download_url.clear();
                         }
                         Err(error) => self.status = format!("Could not queue download: {error}"),
@@ -1969,7 +1978,23 @@ impl LunarApp {
                                         }
                                     }
                                 }
-                                crate::downloads::DownloadState::Completed => {}
+                                crate::downloads::DownloadState::Completed => {
+                                    if ui.small_button("Download again").clicked() {
+                                        match self.downloads.download_again(task.id) {
+                                            Ok(new_id) => self.status = format!("Download #{new_id} queued again"),
+                                            Err(error) => self.status = error.to_string(),
+                                        }
+                                    }
+                                    if ui.small_button("Uninstall file").clicked() {
+                                        match fs::remove_file(&task.destination) {
+                                            Ok(()) => {
+                                                self.downloads.forget(task.id);
+                                                self.status = format!("Removed {}", task.filename);
+                                            }
+                                            Err(error) => self.status = format!("Could not remove {}: {error}", task.filename),
+                                        }
+                                    }
+                                }
                             }
                             });
                         }
@@ -2128,6 +2153,88 @@ impl LunarApp {
             ui.label(RichText::new("Create or select an offline profile before editing a skin.").color(Color32::LIGHT_RED));
             return;
         }
+        if let Some(receiver) = &self.skin_catalogue_rx {
+            match receiver.try_recv() {
+                Ok(Ok(results)) => {
+                    self.skin_catalogue_results = results;
+                    self.skin_catalogue_busy = false;
+                    self.skin_catalogue_rx = None;
+                    self.status = format!("Loaded {} community skins", self.skin_catalogue_results.len());
+                }
+                Ok(Err(error)) => {
+                    self.skin_catalogue_busy = false;
+                    self.skin_catalogue_rx = None;
+                    self.status = format!("Skin search failed: {error}");
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.skin_catalogue_busy = false;
+                    self.skin_catalogue_rx = None;
+                    self.status = "Skin search stopped unexpectedly".into();
+                }
+            }
+        }
+        ui.group(|ui| {
+            ui.label(RichText::new("COMMUNITY SKIN BROWSER").strong().color(self.accent));
+            ui.label(RichText::new("Search published 64×64 and 64×32 skins. No API key or Microsoft sign-in required. Creator credit is shown on every result.").size(10.0).color(Color32::GRAY));
+            ui.horizontal(|ui| {
+                ui.add_sized([ui.available_width() - 94.0, 32.0], egui::TextEdit::singleline(&mut self.skin_catalogue_query).hint_text("Search skins · fox, hoodie, fantasy…"));
+                if ui.add_enabled(!self.skin_catalogue_busy, egui::Button::new("Search")).clicked() {
+                    let query = self.skin_catalogue_query.trim().to_owned();
+                    let (tx, rx) = mpsc::channel();
+                    self.skin_catalogue_rx = Some(rx);
+                    self.skin_catalogue_busy = true;
+                    self.skin_catalogue_results.clear();
+                    std::thread::spawn(move || {
+                        let result = crate::skins::search(&query).map_err(|error| format!("{error:#}"));
+                        let _ = tx.send(result);
+                    });
+                }
+            });
+            if self.skin_catalogue_busy { ui.horizontal(|ui| { ui.spinner(); ui.label("Searching community skins…"); }); }
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                for skin in self.skin_catalogue_results.clone() {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&skin.name).strong());
+                            ui.label(RichText::new(format!("By {} · {} arms", skin.creator, skin.arms)).size(10.0).color(Color32::GRAY));
+                            ui.hyperlink_to("Creator / source", &skin.page);
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Select skin").clicked() {
+                                match crate::skins::download(&skin) {
+                                    Ok(image) => {
+                                        let (width, height) = image.dimensions();
+                                        if (width == 64 && height == 64) || (width == 64 && height == 32) {
+                                            let destination = self.game_root.join("CustomSkinLoader").join("LocalSkin").join("skins").join(format!("{selected}.png"));
+                                            let result = (|| -> anyhow::Result<()> {
+                                                if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
+                                                image.save(&destination)?;
+                                                Ok(())
+                                            })();
+                                            match result {
+                                                Ok(()) => {
+                                                    self.skin_editor = Some(image);
+                                                    self.skin_editor_profile = selected.clone();
+                                                    self.status = format!("{} selected and saved for {}", skin.name, selected);
+                                                }
+                                                Err(error) => self.status = format!("Could not save selected skin: {error:#}"),
+                                            }
+                                        } else {
+                                            self.status = format!("{} has unsupported dimensions ({}×{})", skin.name, width, height);
+                                        }
+                                    }
+                                    Err(error) => self.status = format!("Could not load skin: {error:#}"),
+                                }
+                            }
+                        });
+                    });
+                    ui.separator();
+                }
+            });
+            ui.hyperlink_to("Browse all published skins on Mosaicary", "https://mosaicary.com");
+        });
+        ui.add_space(10.0);
         let skin_dir = self.game_root.join("CustomSkinLoader").join("LocalSkin").join("skins");
         let skin_path = skin_dir.join(format!("{selected}.png"));
         if self.skin_editor_profile != selected {
