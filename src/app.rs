@@ -174,6 +174,7 @@ pub struct LunarApp {
     skin_rotation: f32,
     skin_preview_texture: Option<egui::TextureHandle>,
     skin_overlay_layer: bool,
+    skin_selected_part: String,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
     active_install_task: Option<u64>,
@@ -285,6 +286,7 @@ impl LunarApp {
             skin_rotation: 0.45,
             skin_preview_texture: None,
             skin_overlay_layer: false,
+            skin_selected_part: "All".into(),
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
             active_install_task: None,
@@ -2011,12 +2013,30 @@ impl LunarApp {
             Color32::from_rgba_unmultiplied((total[0]/count) as u8, (total[1]/count) as u8, (total[2]/count) as u8, (total[3]/count) as u8)
         };
         let parts = [
-            ((0.0, 2.65, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8), (8, 8, 8, 8)),
-            ((0.0, 1.35, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12), (20, 20, 8, 12)),
-            ((-0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12), (44, 20, 4, 12)),
-            ((0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12), (36, 52, 4, 12)),
-            ((-0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12), (4, 20, 4, 12)),
-            ((0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12), (20, 52, 4, 12)),
+            ((0.0, 2.65, 0.0), (1.12, 1.12, 1.12), sample(8, 8, 8, 8), [
+                (8, 8, 8, 8), (0, 8, 8, 8), (16, 8, 8, 8),
+                (8, 0, 8, 8), (16, 0, 8, 8), (24, 8, 8, 8),
+            ]),
+            ((0.0, 1.35, 0.0), (1.0, 1.42, 0.55), sample(20, 20, 8, 12), [
+                (20, 20, 8, 12), (16, 20, 4, 12), (28, 20, 4, 12),
+                (20, 16, 8, 4), (28, 16, 8, 4), (32, 20, 8, 12),
+            ]),
+            ((-0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(44, 20, 4, 12), [
+                (44, 20, 4, 12), (40, 20, 4, 12), (48, 20, 4, 12),
+                (44, 16, 4, 4), (48, 16, 4, 4), (52, 20, 4, 12),
+            ]),
+            ((0.82, 1.35, 0.0), (0.42, 1.35, 0.5), sample(36, 52, 4, 12), [
+                (36, 52, 4, 12), (32, 52, 4, 12), (40, 52, 4, 12),
+                (36, 48, 4, 4), (40, 48, 4, 4), (44, 52, 4, 12),
+            ]),
+            ((-0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(4, 20, 4, 12), [
+                (4, 20, 4, 12), (0, 20, 4, 12), (8, 20, 4, 12),
+                (4, 16, 4, 4), (8, 16, 4, 4), (12, 20, 4, 12),
+            ]),
+            ((0.28, 0.32, 0.0), (0.46, 1.35, 0.52), sample(20, 52, 4, 12), [
+                (20, 52, 4, 12), (16, 52, 4, 12), (24, 52, 4, 12),
+                (20, 48, 4, 4), (24, 48, 4, 4), (28, 52, 4, 12),
+            ]),
         ];
         let texture_image = egui::ColorImage::from_rgba_unmultiplied(
             [skin.width() as usize, skin.height() as usize],
@@ -2037,20 +2057,20 @@ impl LunarApp {
         };
         let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
         let mut textured_faces: Vec<SkinTexturedFace> = Vec::new();
-        for (center, size, base, uv_rect) in parts {
+        for (center, size, base, uv_faces) in parts {
             let (cx, cy, cz) = center;
             let (sx, sy, sz) = (size.0/2.0, size.1/2.0, size.2/2.0);
             let vertices = [
                 (cx-sx,cy-sy,cz-sz),(cx+sx,cy-sy,cz-sz),(cx+sx,cy+sy,cz-sz),(cx-sx,cy+sy,cz-sz),
                 (cx-sx,cy-sy,cz+sz),(cx+sx,cy-sy,cz+sz),(cx+sx,cy+sy,cz+sz),(cx-sx,cy+sy,cz+sz),
             ];
-            let indices = [[4,5,6,7],[0,4,7,3],[5,1,2,6],[3,7,6,2],[0,1,5,4]];
+            let indices = [[4,5,6,7],[0,4,7,3],[5,1,2,6],[3,7,6,2],[0,1,5,4],[1,0,3,2]];
             for (face_index, face) in indices.iter().enumerate() {
                 let projected = face.iter().map(|index| project(vertices[*index])).collect::<Vec<_>>();
                 let depth = projected.iter().map(|point| point.1).sum::<f32>() / 4.0;
-                let factor = [1.0, 0.62, 0.82, 1.16, 0.48][face_index];
-                if face_index == 0 {
-                    textured_faces.push((depth, [projected[0].0, projected[1].0, projected[2].0, projected[3].0], uv_rect));
+                let factor = [1.0_f32, 0.62, 0.82, 1.16, 0.48, 0.74][face_index];
+                if face_index < uv_faces.len() {
+                    textured_faces.push((depth, [projected[0].0, projected[1].0, projected[2].0, projected[3].0], uv_faces[face_index]));
                 } else {
                     let color = Color32::from_rgba_unmultiplied(
                         (base.r() as f32 * factor).clamp(0.0,255.0) as u8,
