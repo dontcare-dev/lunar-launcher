@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "nyxclient",
+  "version": "\${version}",
+  "name": "Nyx Client",
+  "description": "Nyx Client interface and configurable performance controls for Minecraft 26.1.2.",
+  "authors": ["Nyx"],
+  "environment": "client",
+  "entrypoints": { "client": ["dev.nyx.client.NyxClient"] },
+  "mixins": [
+    { "config": "nyx-client.mixins.json", "environment": "client" }
+  ],
+  "depends": {
+    "fabricloader": ">=0.20.1",
+    "minecraft": "~\${minecraft_version}",
+    "java": ">=25"
+  }
+}
