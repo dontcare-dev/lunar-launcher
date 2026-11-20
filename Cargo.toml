@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+crust_core = "1.0.3"
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
 md5 = "0.7"
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
@@ -17,6 +18,7 @@ directories = "6"
 egui_extras = { version = "0.31", features = ["svg"] }
 image = { version = "0.25", default-features = false, features = ["gif", "png", "jpeg", "webp"] }
 sysinfo = "0.33"
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [build-dependencies]
 winres = "0.1"
