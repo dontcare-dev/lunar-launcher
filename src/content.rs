@@ -504,10 +504,10 @@ pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: 
             .unwrap_or(&filename).to_owned();
         let mod_id = fabric.as_ref().and_then(|value| value.get("id")).and_then(serde_json::Value::as_str)
             .or_else(|| quilt.as_ref().and_then(|value| value.get("quilt_loader")).and_then(|value| value.get("id")).and_then(serde_json::Value::as_str));
-        if let Some(id) = mod_id {
-            if let Some(previous) = mod_ids.insert(id.to_owned(), filename.clone()) {
-                issues.push(format!("{name}: duplicate mod ID '{id}' also found in {previous}"));
-            }
+        if let Some(id) = mod_id
+            && let Some(previous) = mod_ids.insert(id.to_owned(), filename.clone())
+        {
+            issues.push(format!("{name}: duplicate mod ID '{id}' also found in {previous}"));
         }
         if let Some(dependencies) = fabric.as_ref().and_then(|value| value.get("depends")).and_then(serde_json::Value::as_object) {
             for dependency in dependencies.keys() {
