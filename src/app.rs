@@ -1912,7 +1912,7 @@ impl LunarApp {
             ui.label(RichText::new("ADD DOWNLOAD").strong().size(11.0).color(self.accent));
             ui.horizontal(|ui| {
                 let url_width = (ui.available_width() - 116.0).max(120.0);
-                ui.add_sized([url_width, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste an HTTPS download URL"));
+                ui.add_sized([url_width, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste a mod, pack, shader or modpack URL"));
                 if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Download")).clicked() {
                     match self.downloads.enqueue_routed(self.download_url.trim(), self.game_root.clone()) {
                         Ok(id) => {
@@ -1924,7 +1924,7 @@ impl LunarApp {
                     }
                 }
             });
-            ui.label(RichText::new("Files are saved in Lunar's downloads folder. Only HTTP and HTTPS links are accepted.").size(10.0).color(Color32::GRAY));
+            ui.label(RichText::new("Minecraft packages are automatically routed to Mods, Resource Packs, Shader Packs or Modpacks. Unrecognized files go to Downloads / Unclassified.").size(10.0).color(Color32::GRAY));
         });
         ui.add_space(12.0);
         let tasks = self.downloads.tasks().to_vec();
