@@ -168,6 +168,7 @@ pub struct LunarApp {
     skin_color: Color32,
     skin_rotation: f32,
     skin_preview_texture: Option<egui::TextureHandle>,
+    skin_overlay_layer: bool,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
 }
@@ -272,6 +273,7 @@ impl LunarApp {
             skin_color: Color32::from_rgb(151, 169, 255),
             skin_rotation: 0.45,
             skin_preview_texture: None,
+            skin_overlay_layer: false,
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
         };
@@ -2056,6 +2058,10 @@ impl LunarApp {
         });
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.skin_overlay_layer, false, "Base layer");
+            ui.add_enabled_ui(self.skin_editor.as_ref().is_some_and(|skin| skin.height() >= 64), |ui| {
+                ui.selectable_value(&mut self.skin_overlay_layer, true, "Outer layer");
+            });
             if ui.button("Import PNG").clicked()
                 && let Some(source) = Self::choose_content_file("skin")
             {
@@ -2110,10 +2116,27 @@ impl LunarApp {
                 let x = ((pointer.x - rect.left()) / cell).floor() as u32;
                 let y = ((pointer.y - rect.top()) / cell).floor() as u32;
                 if x < width && y < height {
-                    skin.put_pixel(x, y, image::Rgba([self.skin_color.r(), self.skin_color.g(), self.skin_color.b(), self.skin_color.a()]));
+                    let scale_x = (width / 64).max(1);
+                    let scale_y = (height / 64).max(1);
+                    let base_x = x / scale_x;
+                    let base_y = y / scale_y;
+                    let overlay_regions = [
+                        (40, 8, 8, 8),
+                        (20, 36, 8, 12),
+                        (44, 36, 4, 12),
+                        (52, 52, 4, 12),
+                        (4, 36, 4, 12),
+                        (4, 52, 4, 12),
+                    ];
+                    let in_overlay = overlay_regions.iter().any(|(rx, ry, rw, rh)| {
+                        base_x >= *rx && base_x < *rx + *rw && base_y >= *ry && base_y < *ry + *rh
+                    });
+                    if !self.skin_overlay_layer || in_overlay {
+                        skin.put_pixel(x, y, image::Rgba([self.skin_color.r(), self.skin_color.g(), self.skin_color.b(), self.skin_color.a()]));
+                    }
                 }
             }
-            ui.label(RichText::new(format!("{} × {} skin texture · tap or drag to paint pixels", width, height)).size(11.0).color(Color32::GRAY));
+            ui.label(RichText::new(format!("{} × {} skin texture · {} · tap or drag to paint", width, height, if self.skin_overlay_layer { "outer layer UV regions" } else { "base texture" })).size(11.0).color(Color32::GRAY));
             ui.horizontal_wrapped(|ui| {
                 save_requested = ui.button("Save skin").clicked();
                 reload_requested = ui.button("Undo changes / reload").clicked();
