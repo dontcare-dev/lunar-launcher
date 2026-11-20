@@ -227,6 +227,8 @@ impl LunarApp {
         let installed_ids = launcher::installed_versions(&game_root).unwrap_or_default();
         let java_status = launcher::detect_java().unwrap_or_else(|_| "No system Java found. Lunar will download the compatible runtime automatically when Minecraft launches.".into());
         let preferences = LauncherPreferences::load();
+        let workspace_instances = crate::workspace::list_instances(&game_root).unwrap_or_default();
+        let workspace_selected = workspace_instances.first().map(|instance| instance.id.clone());
         let mut app = Self {
             profiles: ProfileStore::load(),
             screen: Screen::Home,
@@ -281,8 +283,8 @@ impl LunarApp {
             background_frame: 0,
             background_next: Instant::now(),
             background_rx: None,
-            workspace_instances: crate::workspace::list_instances(&game_root).unwrap_or_default(),
-            workspace_selected: None,
+            workspace_instances,
+            workspace_selected,
             new_instance_name: String::new(),
             crash_analysis: None,
             play_stats: crate::stats::PlayStats::load(),
@@ -1914,7 +1916,11 @@ impl LunarApp {
                 let url_width = (ui.available_width() - 116.0).max(120.0);
                 ui.add_sized([url_width, 34.0], egui::TextEdit::singleline(&mut self.download_url).hint_text("Paste a mod, pack, shader or modpack URL"));
                 if ui.add_enabled(!self.download_url.trim().is_empty(), egui::Button::new("Download")).clicked() {
-                    match self.downloads.enqueue_routed(self.download_url.trim(), self.game_root.clone()) {
+                    let target_root = self.workspace_instances.iter()
+                        .find(|instance| Some(instance.id.as_str()) == self.workspace_selected.as_deref())
+                        .map(|instance| crate::workspace::instance_path(&self.game_root, instance))
+                        .unwrap_or_else(|| self.game_root.clone());
+                    match self.downloads.enqueue_routed(self.download_url.trim(), target_root) {
                         Ok(id) => {
                             let destination = self.downloads.tasks().iter().find(|task| task.id == id).map(|task| task.destination.display().to_string()).unwrap_or_default();
                             self.status = format!("Download #{id} routed to {destination}");
