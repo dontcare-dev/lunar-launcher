@@ -76,6 +76,7 @@ enum Screen {
     LivePerformance,
     PlayStats,
     SkinManager,
+    Credits,
 }
 
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
@@ -161,6 +162,9 @@ pub struct LunarApp {
     microsoft_rx: Option<Receiver<MicrosoftLoginEvent>>,
     microsoft_account: Option<crust_core::authenticator::Account>,
     microsoft_code: Option<(String, String)>,
+    skin_editor: Option<image::RgbaImage>,
+    skin_editor_profile: String,
+    skin_color: Color32,
 }
 
 impl LunarApp {
@@ -258,6 +262,9 @@ impl LunarApp {
             microsoft_rx: None,
             microsoft_account: Self::load_microsoft_account(),
             microsoft_code: None,
+            skin_editor: None,
+            skin_editor_profile: String::new(),
+            skin_color: Color32::from_rgb(151, 169, 255),
         };
         if let Some(saved_account) = app.microsoft_account.clone() {
             let (tx, rx) = mpsc::channel();
@@ -714,7 +721,7 @@ impl LunarApp {
                 });
                 ui.add_space(34.0);
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-                    let navigation: [NavigationItem; 14] = [
+                    let navigation: [NavigationItem; 15] = [
                         ("Home", Screen::Home, "bytes://lunar-home.svg", include_bytes!("../assets/icons/home.svg")),
                         ("Play", Screen::Play, "bytes://lunar-play.svg", include_bytes!("../assets/icons/play.svg")),
                         ("Play Stats", Screen::PlayStats, "bytes://lunar-monitor.svg", include_bytes!("../assets/icons/monitor.svg")),
@@ -728,6 +735,7 @@ impl LunarApp {
                         ("Launcher Customization", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                         ("Servers", Screen::Servers, "bytes://lunar-servers.svg", include_bytes!("../assets/icons/servers.svg")),
                         ("Skin Manager", Screen::SkinManager, "bytes://lunar-profiles.svg", include_bytes!("../assets/icons/profiles.svg")),
+                        ("Credits", Screen::Credits, "bytes://lunar-credits.svg", include_bytes!("../assets/icons/credits.svg")),
                         ("Settings", Screen::Settings, "bytes://lunar-settings.svg", include_bytes!("../assets/icons/settings.svg")),
                     ];
                     for (label, screen, uri, icon) in navigation {
@@ -1794,59 +1802,142 @@ impl LunarApp {
     }
 
     fn skin_manager_ui(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Skin Manager", "Manage local skins for your offline Minecraft profile.");
+        Self::heading(ui, "Skin Manager", "Create, paint, preview and apply a custom Minecraft skin.");
         let selected = self.profiles.selected.clone().unwrap_or_default();
         if selected.is_empty() {
-            ui.label(RichText::new("Create or select an offline profile before importing a skin.").color(Color32::LIGHT_RED));
+            ui.label(RichText::new("Create or select an offline profile before editing a skin.").color(Color32::LIGHT_RED));
             return;
         }
         let skin_dir = self.game_root.join("CustomSkinLoader").join("LocalSkin").join("skins");
         let skin_path = skin_dir.join(format!("{selected}.png"));
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.label(RichText::new("ACTIVE OFFLINE PROFILE").size(10.0).strong().color(self.accent));
-            ui.label(RichText::new(&selected).size(24.0).strong());
-            ui.add_space(8.0);
+        if self.skin_editor_profile != selected {
+            self.skin_editor = image::open(&skin_path).ok().map(|image| image.to_rgba8());
+            self.skin_editor_profile = selected.clone();
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("ACTIVE PROFILE").size(10.0).strong().color(self.accent));
+            ui.label(RichText::new(&selected).size(18.0).strong());
             if skin_path.exists() {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("LOCAL SKIN").strong());
-                    ui.label(RichText::new("Installed").color(Color32::from_rgb(112, 224, 185)));
-                });
-                ui.label(skin_path.display().to_string());
-                if ui.button("Remove skin").clicked() {
-                    match fs::remove_file(&skin_path) {
-                        Ok(()) => self.status = format!("Removed the local skin for {selected}"),
-                        Err(error) => self.status = format!("Could not remove skin: {error}"),
-                    }
-                }
+                ui.label(RichText::new("● Skin installed").color(Color32::from_rgb(112, 224, 185)));
             } else {
-                ui.label(RichText::new("No local skin assigned").color(Color32::GRAY));
+                ui.label(RichText::new("No saved skin").color(Color32::GRAY));
             }
-            ui.add_space(10.0);
-            if ui.button("Import PNG skin").clicked()
+        });
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Import PNG").clicked()
                 && let Some(source) = Self::choose_content_file("skin")
             {
-                let result = (|| -> anyhow::Result<()> {
-                    let image = image::open(&source)?;
-                    let (width, height) = (image.width(), image.height());
+                let result = (|| -> anyhow::Result<image::RgbaImage> {
+                    let image = image::open(&source)?.to_rgba8();
+                    let (width, height) = image.dimensions();
                     let valid = (width == height && width >= 64 && width % 64 == 0)
                         || (width == height * 2 && width % 64 == 0 && height % 32 == 0);
                     if !valid {
-                        anyhow::bail!("Skin must use a Minecraft skin layout such as 64×64 or 64×32 (HD multiples are supported)");
+                        anyhow::bail!("Use a Minecraft skin layout such as 64×64 or 64×32 (HD multiples are supported)");
                     }
-                    fs::create_dir_all(&skin_dir)?;
-                    fs::copy(&source, &skin_path)?;
-                    Ok(())
+                    Ok(image)
                 })();
-                self.status = result.map(|_| format!("Skin imported for {selected}. Restart Minecraft to load it."))
-                    .unwrap_or_else(|error| format!("Skin import failed: {error:#}"));
+                match result {
+                    Ok(image) => { self.skin_editor = Some(image); self.status = "Skin loaded into the editor".into(); }
+                    Err(error) => self.status = format!("Skin import failed: {error:#}"),
+                }
             }
+            if ui.button("New blank skin").clicked() {
+                self.skin_editor = Some(image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 0, 0])));
+            }
+            ui.color_edit_button_srgba(&mut self.skin_color);
+            ui.label("Brush colour");
+        });
+        ui.add_space(8.0);
+        if let Some(skin) = self.skin_editor.as_mut() {
+            let (width, height) = skin.dimensions();
+            let canvas_size = 384.0_f32;
+            let cell = canvas_size / width.max(height) as f32;
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(canvas_size), egui::Sense::click_and_drag());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 4.0, Color32::from_rgb(25, 30, 43));
+            for y in 0..height {
+                for x in 0..width {
+                    let pixel = skin.get_pixel(x, y);
+                    let color = Color32::from_rgba_unmultiplied(pixel[0], pixel[1], pixel[2], pixel[3]);
+                    let tile = egui::Rect::from_min_size(rect.min + Vec2::new(x as f32 * cell, y as f32 * cell), Vec2::splat(cell));
+                    painter.rect_filled(tile, 0.0, color);
+                    painter.rect_stroke(tile, 0.0, Stroke::new(0.35, Color32::from_rgba_unmultiplied(120, 130, 155, 70)), egui::StrokeKind::Inside);
+                }
+            }
+            if (response.clicked() || response.dragged())
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let x = ((pointer.x - rect.left()) / cell).floor() as u32;
+                let y = ((pointer.y - rect.top()) / cell).floor() as u32;
+                if x < width && y < height {
+                    skin.put_pixel(x, y, image::Rgba([self.skin_color.r(), self.skin_color.g(), self.skin_color.b(), self.skin_color.a()]));
+                }
+            }
+            ui.label(RichText::new(format!("{} × {} skin texture · tap or drag to paint pixels", width, height)).size(11.0).color(Color32::GRAY));
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Save skin").clicked() {
+                    let result = (|| -> anyhow::Result<()> {
+                        fs::create_dir_all(&skin_dir)?;
+                        skin.save(&skin_path)?;
+                        Ok(())
+                    })();
+                    self.status = result.map(|_| format!("Custom skin saved for {selected}"))
+                        .unwrap_or_else(|error| format!("Could not save skin: {error:#}"));
+                }
+                if ui.button("Undo changes / reload").clicked() {
+                    self.skin_editor = image::open(&skin_path).ok().map(|image| image.to_rgba8());
+                }
+                if ui.button("Clear editor").clicked() {
+                    *skin = image::RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+                }
+                if ui.button("Remove saved skin").clicked() {
+                    match fs::remove_file(&skin_path) {
+                        Ok(()) => { self.skin_editor = None; self.status = "Saved skin removed".into(); }
+                        Err(error) => self.status = format!("Could not remove skin: {error}"),
+                    }
+                }
+            });
+        } else {
+            ui.group(|ui| {
+                ui.label(RichText::new("YOUR SKIN WORKSPACE").strong().color(self.accent));
+                ui.label("Import a PNG skin or start with a blank 64×64 canvas. Paint directly on the texture, then save it to this profile.");
+            });
+        }
+        ui.add_space(12.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("HOW IT APPEARS IN GAME").strong().color(self.accent));
+            ui.label("Offline profile skins are stored locally. Install the client-side CustomSkinLoader mod in the Minecraft instance to load this skin. Lunar does not upload offline skins to Mojang, and other players may not see it unless their setup uses the same local skin source.");
+        });
+    }
+
+    fn credits_ui(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "Credits", "The person behind Lunar Launcher.");
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("NYX").size(30.0).strong().color(self.accent));
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("nyx").size(22.0).strong());
+                    ui.label(RichText::new("Full-stack developer · Builder of things").color(Color32::GRAY));
+                    ui.label("meow~");
+                });
+            });
+            ui.add_space(12.0);
+            ui.label(RichText::new("DISCORD").size(10.0).strong().color(self.accent));
+            ui.label("1429093326505640016");
+            ui.hyperlink_to("Open Discord profile", "https://discord.com/users/1429093326505640016");
+            ui.add_space(8.0);
+            ui.label(RichText::new("INSTAGRAM").size(10.0).strong().color(self.accent));
+            ui.hyperlink_to("@nyxcxcxcx", "https://www.instagram.com/nyxcxcxcx/");
+            ui.add_space(8.0);
+            ui.label(RichText::new("LIVE DISCORD PRESENCE").size(10.0).strong().color(self.accent));
+            ui.label("Lanyard profile endpoint");
+            ui.hyperlink_to("View Lanyard presence data", "https://api.lanyard.rest/v1/users/1429093326505640016");
+            ui.label(RichText::new("Lanyard provides Discord profile and presence data when the account is available to its service.").size(11.0).color(Color32::GRAY));
         });
         ui.add_space(10.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("IN-GAME REQUIREMENT").strong().color(self.accent));
-            ui.label("Offline profiles cannot upload a skin to Mojang. To display this local skin in Minecraft, install the client-side CustomSkinLoader mod in the instance. Lunar stores the PNG in its LocalSkin folder using your exact offline profile name.");
-            ui.label(RichText::new("The imported file is local and is not uploaded. Restart Minecraft after changing it. Other players will only see the skin if their setup also supports the same local skin source.").size(11.0).color(Color32::GRAY));
-        });
+        ui.label(RichText::new("Built with care for the Minecraft community.").size(12.0).color(Color32::GRAY));
     }
 
     fn play_stats_ui(&mut self, ui: &mut egui::Ui) {
@@ -2267,6 +2358,7 @@ impl eframe::App for LunarApp {
                             Screen::Servers => self.servers(ui),
                             Screen::PlayStats => self.play_stats_ui(ui),
                             Screen::SkinManager => self.skin_manager_ui(ui),
+                            Screen::Credits => self.credits_ui(ui),
                             Screen::LivePerformance => self.live_performance_manager(ui),
                             Screen::Settings => self.settings(ui),
                         }
