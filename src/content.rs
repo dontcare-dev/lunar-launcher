@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
-use std::{fs, io::{Cursor, Read}, path::{Component, Path, PathBuf}};
+use std::{collections::{HashMap, HashSet}, fs, io::{Cursor, Read}, path::{Component, Path, PathBuf}};
 use zip::ZipArchive;
 
 const API: &str = "https://api.modrinth.com/v2";
@@ -438,9 +438,13 @@ pub fn resolve_instance_dependencies(instance: &Path, minecraft: &str, loader: &
     let missing = dependencies.into_iter()
         .filter(|dependency| dependency.dependency_type.as_deref() == Some("required"))
         .filter(|dependency| {
-            let project = dependency.project_id.as_deref().is_none_or(|id| !installed_projects.contains(id));
-            let version = dependency.version_id.as_deref().is_none_or(|id| !installed_versions.contains(id));
-            project && version
+            if let Some(version_id) = dependency.version_id.as_deref() {
+                !installed_versions.contains(version_id)
+            } else if let Some(project_id) = dependency.project_id.as_deref() {
+                !installed_projects.contains(project_id)
+            } else {
+                false
+            }
         })
         .collect::<Vec<_>>();
     if missing.is_empty() { return Ok(Vec::new()); }
