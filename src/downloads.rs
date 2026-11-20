@@ -39,6 +39,8 @@ pub struct DownloadTask {
     pub state: DownloadState,
     pub downloaded: u64,
     pub total: Option<u64>,
+    #[serde(default)]
+    pub logs: Vec<String>,
 }
 
 #[derive(Default)]
@@ -125,7 +127,7 @@ impl DownloadManager {
         let url = url.to_owned();
         let control = Arc::new((Mutex::new(ControlState::default()), Condvar::new()));
         self.controls.insert(id, Arc::clone(&control));
-        let task = DownloadTask { id, url: url.clone(), filename: destination.file_name().and_then(|value| value.to_str()).unwrap_or(&filename).to_owned(), destination: destination.clone(), state: DownloadState::Queued, downloaded: 0, total: None };
+        let task = DownloadTask { id, url: url.clone(), filename: destination.file_name().and_then(|value| value.to_str()).unwrap_or(&filename).to_owned(), destination: destination.clone(), state: DownloadState::Queued, downloaded: 0, total: None, logs: vec!["Added to download history".into()] };
         self.tasks.push(task);
         self.persist();
         let sender = self.sender.clone();
@@ -222,6 +224,10 @@ impl DownloadManager {
         while let Ok(update) = self.receiver.try_recv() {
             changed = true;
             if let Some(task) = self.tasks.iter_mut().find(|task| task.id == update.id) {
+                if task.state != update.state {
+                    task.logs.push(update.state.label());
+                    if task.logs.len() > 24 { task.logs.remove(0); }
+                }
                 task.state = update.state.clone();
                 task.downloaded = update.downloaded;
                 task.total = update.total;
