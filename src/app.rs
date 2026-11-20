@@ -667,8 +667,8 @@ impl LunarApp {
     }
 
     fn launch_selected(&mut self) {
-        let Some(microsoft_account) = self.microsoft_account.clone() else {
-            self.status = "Sign in with a Microsoft account that owns Minecraft Java Edition to launch".into();
+        let Some(profile) = self.profiles.profiles.iter().find(|profile| Some(profile.name.as_str()) == self.profiles.selected.as_deref()).cloned() else {
+            self.status = "Create or select an offline profile before launching".into();
             self.screen = Screen::Profiles;
             return;
         };
@@ -700,7 +700,7 @@ impl LunarApp {
             });
             return;
         }
-        let launch_result = launcher::launch_with_account(&installed, &microsoft_account, self.memory_mb, &self.performance_mode);
+        let launch_result = launcher::launch_offline(&installed, &profile, self.memory_mb, &self.performance_mode);
         match launch_result {
             Ok(process) => {
                 self.installed_version = Some(installed.clone());
@@ -898,20 +898,13 @@ impl LunarApp {
     }
 
     fn play(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Play", "Sign in with Microsoft, choose a Minecraft version and launch.");
+        Self::heading(ui, "Play", "Choose your local profile and Minecraft version, then launch offline.");
         ui.group(|ui| {
-            ui.label(RichText::new("MICROSOFT PLAYER").size(10.0).color(Color32::GRAY).strong());
+            ui.label(RichText::new("OFFLINE PLAYER").size(10.0).color(Color32::GRAY).strong());
             ui.add_space(6.0);
-            if let Some(account_name) = self.microsoft_account.as_ref().map(|account| account.name.clone()) {
-                ui.label(RichText::new(account_name).size(18.0).strong());
-                ui.label(RichText::new("Authenticated Minecraft account").size(11.0).color(Color32::GRAY));
-            } else {
-                ui.label("No Microsoft account connected");
-                if ui.button("Connect Microsoft account").clicked() {
-                    self.screen = Screen::Profiles;
-                }
-            }
-            if ui.button("Manage accounts").clicked() {
+            ui.label(RichText::new(self.profiles.selected.as_deref().unwrap_or("No profile selected")).size(18.0).strong());
+            ui.label(RichText::new("Local profile · No Microsoft sign-in needed").size(11.0).color(Color32::GRAY));
+            if ui.button("Manage profiles").clicked() {
                 self.screen = Screen::Profiles;
             }
         });
@@ -1170,7 +1163,7 @@ impl LunarApp {
     }
 
     fn profiles(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "Profiles", "Connect a Microsoft account to play Minecraft Java Edition.");
+        Self::heading(ui, "Profiles", "Create and select local player names. Microsoft sign-in is optional.");
         ui.group(|ui| {
             ui.label(RichText::new("MICROSOFT ACCOUNT").size(10.0).color(self.accent).strong());
             if let Some(account_name) = self.microsoft_account.as_ref().map(|account| account.name.clone()) {
@@ -1201,8 +1194,8 @@ impl LunarApp {
             }
         });
         ui.add_space(12.0);
-        ui.label(RichText::new("LOCAL PROFILE LABELS").size(10.0).color(Color32::GRAY).strong());
-        ui.label(RichText::new("Local profile labels do not authenticate or grant game ownership. A Microsoft account with Minecraft Java Edition is required to launch.").size(11.0).color(Color32::GRAY));
+        ui.label(RichText::new("OFFLINE PROFILES").size(10.0).color(Color32::GRAY).strong());
+        ui.label(RichText::new("Offline mode is for local play and servers that allow unauthenticated connections. Microsoft sign-in is only needed for authenticated online services and servers.").size(11.0).color(Color32::GRAY));
         ui.group(|ui| {
             ui.label(RichText::new("CREATE PROFILE").size(10.0).color(Color32::GRAY).strong());
             ui.horizontal(|ui| {
@@ -2441,11 +2434,11 @@ impl LunarApp {
         });
         ui.add_space(8.0);
         if ui.button("Launch this instance").clicked() {
-            if let Some(account) = self.microsoft_account.clone() {
+            if let Some(profile) = self.profiles.profiles.iter().find(|profile| Some(profile.name.as_str()) == self.profiles.selected.as_deref()).cloned() {
                 match launcher::load_installed(&instance.minecraft, &self.game_root) {
                     Ok(mut installed) => {
                         installed.game_directory = Some(path);
-                        match launcher::launch_with_account_settings(&installed, &account, instance.memory_mb, &instance.performance_mode, instance.java_major, &instance.jvm_arguments) {
+                        match launcher::launch_offline_settings(&installed, &profile, instance.memory_mb, &instance.performance_mode, instance.java_major, &instance.jvm_arguments) {
                             Ok(process) => {
                                 self.game_process = Some(process);
                                 self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
@@ -2459,7 +2452,7 @@ impl LunarApp {
                     Err(error) => self.status = error.to_string(),
                 }
             } else {
-                self.status = "Sign in with Microsoft to launch Minecraft Java Edition".into();
+                self.status = "Create or select an offline profile before launching".into();
                 self.screen = Screen::Profiles;
             }
         }
@@ -2764,11 +2757,11 @@ impl eframe::App for LunarApp {
             if let Some(id) = self.active_modpack_task.take() { self.downloads.finish_operation(id, operation_result); }
             match result {
                 Ok(mut installed) => {
-                    if let Some(account) = self.microsoft_account.clone() {
+                    if let Some(profile) = self.profiles.profiles.iter().find(|profile| Some(profile.name.as_str()) == self.profiles.selected.as_deref()).cloned() {
                         if let Some(mut instance) = self.pending_instance_launch.take() {
                             let instance_path = crate::workspace::instance_path(&self.game_root, &instance);
                             installed.game_directory = Some(instance_path);
-                            match launcher::launch_with_account(&installed, &account, instance.memory_mb, &self.performance_mode) {
+                            match launcher::launch_offline(&installed, &profile, instance.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
@@ -2779,7 +2772,7 @@ impl eframe::App for LunarApp {
                                 Err(error) => self.status = format!("{error:#}"),
                             }
                         } else {
-                            match launcher::launch_with_account(&installed, &account, self.memory_mb, &self.performance_mode) {
+                            match launcher::launch_offline(&installed, &profile, self.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), None);
@@ -2790,7 +2783,7 @@ impl eframe::App for LunarApp {
                         }
                     } else {
                         self.pending_instance_launch = None;
-                        self.status = "Sign in with Microsoft to launch a modpack".into();
+                        self.status = "Create or select an offline profile to launch this modpack".into();
                     }
                 }
                 Err(error) => {
