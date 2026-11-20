@@ -333,12 +333,22 @@ pub fn install_modpack(project_id: &str, root: &Path) -> Result<String> {
     let versions = http.get(format!("{API}/project/{project_id}/version")).send()?.error_for_status()?.json::<Vec<ProjectVersion>>()?;
     let version = versions.first().context("No modpack version was found")?;
     let file = version.files.iter().find(|file| file.primary).or_else(|| version.files.first()).context("The modpack version contains no file")?;
-    let bytes = http.get(&file.url).send()?.error_for_status()?.bytes()?;
-    if let Some(expected) = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"))
-        && !format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
-    {
-        bail!("Modpack checksum verification failed");
+    let expected = file.hashes.as_ref().and_then(|hashes| hashes.get("sha1"));
+    let mut downloaded = None;
+    for attempt in 0..3 {
+        if let Ok(response) = http.get(&file.url).send().and_then(reqwest::blocking::Response::error_for_status)
+            && let Ok(bytes) = response.bytes()
+            && !bytes.is_empty()
+            && expected.is_none_or(|hash| format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(hash))
+        {
+            downloaded = Some(bytes);
+            break;
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(500 * (attempt + 1) as u64));
+        }
     }
+    let bytes = downloaded.context("Could not download or verify the modpack archive after three attempts")?;
     install_modpack_bytes(&bytes, root)
 }
 
