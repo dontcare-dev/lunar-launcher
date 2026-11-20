@@ -1,7 +1,0 @@
-{
-  "required": true,
-  "package": "dev.nyx.client.mixin",
-  "compatibilityLevel": "JAVA_25",
-  "client": ["PauseScreenMixin", "ScreenAccessor"],
-  "injectors": { "defaultRequire": 1 }
-}
