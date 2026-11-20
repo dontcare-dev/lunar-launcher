@@ -1673,7 +1673,17 @@ impl LunarApp {
                                 self.modpack_launch_rx = Some(rx);
                                 self.active_modpack_task = Some(self.downloads.begin_operation("Prepare modpack instance", root.clone()));
                                 self.status = format!("Preparing {}…", pack.name);
-                                std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
+                                std::thread::spawn(move || {
+                                    let result = (|| -> anyhow::Result<InstalledVersion> {
+                                        let loader = pack.loaders.keys().find(|key| key.as_str() != "minecraft")
+                                            .map(|key| key.trim_end_matches("-loader").to_owned())
+                                            .unwrap_or_else(|| "fabric".to_owned());
+                                        crate::content::resolve_instance_dependencies(&pack.instance, &pack.minecraft, &loader)
+                                            .context("Could not install all required modpack dependencies")?;
+                                        crate::loaders::prepare_modpack(&pack, &root)
+                                    })().map_err(|error| format!("{error:#}"));
+                                    let _ = tx.send(result);
+                                });
                             } else { self.status = "Create or select an offline profile before launching".into(); self.screen = Screen::Profiles; }
                         }
                     });
