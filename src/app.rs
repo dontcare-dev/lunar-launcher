@@ -1382,13 +1382,13 @@ impl LunarApp {
                             });
                         }
                         if ui.add_enabled(self.game_process.is_none() && self.modpack_launch_rx.is_none() && !self.content_busy, egui::Button::new("Launch")).clicked() {
-                            if self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|p| &p.name == name)) {
+                            if self.microsoft_account.is_some() || self.profiles.selected.as_ref().is_some_and(|name| self.profiles.profiles.iter().any(|p| &p.name == name)) {
                                 let root = self.game_root.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.modpack_launch_rx = Some(rx);
                                 self.status = format!("Preparing {}…", pack.name);
                                 std::thread::spawn(move || { let _ = tx.send(crate::loaders::prepare_modpack(&pack, &root).map_err(|error| format!("{error:#}"))); });
-                            } else { self.status = "Select an offline profile first".into(); }
+                            } else { self.status = "Sign in with Microsoft or select an offline profile first".into(); }
                         }
                     });
                 });
@@ -2072,13 +2072,22 @@ impl eframe::App for LunarApp {
             self.modpack_launch_rx = None;
             match result {
                 Ok(mut installed) => {
-                    if let Some(profile) = self.profiles.profiles.iter().find(|profile| {
+                    let microsoft_account = self.microsoft_account.clone();
+                    let offline_profile = self.profiles.profiles.iter().find(|profile| {
                         Some(profile.name.as_str()) == self.profiles.selected.as_deref()
-                    }) {
+                    }).cloned();
+                    if microsoft_account.is_some() || offline_profile.is_some() {
                         if let Some(mut instance) = self.pending_instance_launch.take() {
                             let instance_path = crate::workspace::instance_path(&self.game_root, &instance);
                             installed.game_directory = Some(instance_path);
-                            match launcher::launch_with_java(&installed, &profile.name, &profile.uuid, instance.memory_mb, &self.performance_mode, instance.java_major) {
+                            let result = if let Some(account) = microsoft_account.as_ref() {
+                                launcher::launch_with_account(&installed, account, instance.memory_mb, &self.performance_mode)
+                            } else if let Some(profile) = offline_profile.as_ref() {
+                                launcher::launch_with_java(&installed, &profile.name, &profile.uuid, instance.memory_mb, &self.performance_mode, instance.java_major)
+                            } else {
+                                return;
+                            };
+                            match result {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
@@ -2089,7 +2098,14 @@ impl eframe::App for LunarApp {
                                 Err(error) => self.status = format!("{error:#}"),
                             }
                         } else {
-                            match launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode) {
+                            let result = if let Some(account) = microsoft_account.as_ref() {
+                                launcher::launch_with_account(&installed, account, self.memory_mb, &self.performance_mode)
+                            } else if let Some(profile) = offline_profile.as_ref() {
+                                launcher::launch(&installed, &profile.name, &profile.uuid, self.memory_mb, &self.performance_mode)
+                            } else {
+                                return;
+                            };
+                            match result {
                                 Ok(process) => {
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), None);
@@ -2100,7 +2116,7 @@ impl eframe::App for LunarApp {
                         }
                     } else {
                         self.pending_instance_launch = None;
-                        self.status = "Select an offline profile first".into();
+                        self.status = "Sign in with Microsoft or select an offline profile first".into();
                     }
                 }
                 Err(error) => {
