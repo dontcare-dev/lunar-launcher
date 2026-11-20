@@ -103,6 +103,35 @@ impl DownloadManager {
         &self.tasks
     }
 
+    pub fn begin_operation(&mut self, label: &str, destination: PathBuf) -> u64 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        self.tasks.push(DownloadTask {
+            id,
+            url: "lunar://internal-operation".into(),
+            filename: label.to_owned(),
+            destination,
+            state: DownloadState::Downloading,
+            downloaded: 0,
+            total: None,
+            logs: vec!["Started by Lunar".into()],
+        });
+        self.persist();
+        id
+    }
+
+    pub fn finish_operation(&mut self, id: u64, result: Result<(), String>) {
+        if let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) {
+            let state = match result {
+                Ok(()) => DownloadState::Completed,
+                Err(error) => DownloadState::Failed(error),
+            };
+            task.logs.push(state.label());
+            task.state = state;
+            self.persist();
+        }
+    }
+
     pub fn enqueue(&mut self, url: &str, directory: PathBuf) -> anyhow::Result<u64> {
         let parsed = reqwest::Url::parse(url)?;
         if !matches!(parsed.scheme(), "http" | "https") {
