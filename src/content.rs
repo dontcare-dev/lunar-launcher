@@ -79,6 +79,34 @@ fn safe_relative(value: &str) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+
+pub fn mark_project_installed(root: &Path, kind: &str, project_id: &str) -> Result<()> {
+    let path = root.join(".lunar-installed-content.json");
+    let mut registry: serde_json::Value = if path.exists() {
+        serde_json::from_slice(&fs::read(&path)?)?
+    } else {
+        serde_json::json!({})
+    };
+    let entries = registry.as_object_mut().context("Installed content registry is invalid")?;
+    let ids = entries.entry(kind.to_owned()).or_insert_with(|| serde_json::json!([]));
+    let ids = ids.as_array_mut().context("Installed content registry entry is invalid")?;
+    if !ids.iter().any(|value| value.as_str() == Some(project_id)) {
+        ids.push(serde_json::json!(project_id));
+    }
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_vec_pretty(&registry)?)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+pub fn project_is_installed(root: &Path, kind: &str, project_id: &str) -> bool {
+    let path = root.join(".lunar-installed-content.json");
+    fs::read(path).ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|registry| registry.get(kind).and_then(serde_json::Value::as_array).cloned())
+        .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(project_id)))
+}
+
 pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
     if !matches!(kind, "modpack" | "resourcepack" | "mod" | "shader") { bail!("Unsupported Modrinth project type"); }
     let facets = format!("[[\"project_type:{kind}\"]]");
@@ -218,19 +246,45 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
         if destination.exists() { continue; }
         let mut downloaded = None;
         for url in &item.downloads {
-            if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status)
-                && let Ok(bytes) = response.bytes()
-            {
-                let valid = item.hashes.get("sha1").is_none_or(|expected| {
-                    format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
-                });
-                if valid {
-                    downloaded = Some(bytes);
-                    break;
+            for attempt in 0..3 {
+                if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status)
+                    && let Ok(bytes) = response.bytes()
+                {
+                    let valid = item.hashes.get("sha1").is_none_or(|expected| {
+                        format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(expected)
+                    });
+                    if valid && !bytes.is_empty() {
+                        downloaded = Some(bytes);
+                        break;
+                    }
+                }
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(350 * (attempt + 1) as u64));
+                }
+            }
+            if downloaded.is_some() { break; }
+        }
+        if downloaded.is_none()
+            && let Some(hash) = item.hashes.get("sha1")
+            && let Ok(response) = http.get(format!("{API}/version_file/{hash}?algorithm=sha1")).send()
+            && let Ok(response) = response.error_for_status()
+            && let Ok(version) = response.json::<serde_json::Value>()
+        {
+            if let Some(files) = version.get("files").and_then(serde_json::Value::as_array) {
+                for file in files {
+                    let Some(url) = file.get("url").and_then(serde_json::Value::as_str) else { continue };
+                    if let Ok(response) = http.get(url).send().and_then(reqwest::blocking::Response::error_for_status)
+                        && let Ok(bytes) = response.bytes()
+                        && !bytes.is_empty()
+                        && format!("{:x}", Sha1::digest(&bytes)).eq_ignore_ascii_case(hash)
+                    {
+                        downloaded = Some(bytes);
+                        break;
+                    }
                 }
             }
         }
-        let bytes = downloaded.ok_or_else(|| anyhow!("Could not download or verify modpack file {}", item.path))?;
+        let bytes = downloaded.ok_or_else(|| anyhow!("Could not download or verify modpack file {} after retries and Modrinth hash recovery", item.path))?;
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
         fs::write(destination, bytes)?;
     }
