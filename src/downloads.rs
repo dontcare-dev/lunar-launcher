@@ -87,6 +87,24 @@ impl Default for DownloadManager {
     }
 }
 
+fn routed_directory(filename: &str, root: &Path) -> PathBuf {
+    if filename.ends_with(".jar") {
+        root.join("mods")
+    } else if filename.ends_with(".mrpack") {
+        root.join("downloads").join("modpacks")
+    } else if filename.ends_with(".zip") && [
+        "shader", "complementary", "bsl", "seus", "sildurs", "chocapic", "nostalgia", "projectluma",
+    ].iter().any(|keyword| filename.contains(keyword)) {
+        root.join("shaderpacks")
+    } else if filename.ends_with(".zip") && [
+        "resource", "texture", "faithful", "vanilla", "stay", "mizuno",
+    ].iter().any(|keyword| filename.contains(keyword)) {
+        root.join("resourcepacks")
+    } else {
+        root.join("downloads").join("unclassified")
+    }
+}
+
 impl DownloadManager {
     fn persist(&self) {
         let Some(path) = &self.history_path else { return };
@@ -254,17 +272,7 @@ impl DownloadManager {
             anyhow::bail!("Only HTTP and HTTPS download links are supported");
         }
         let filename = parsed.path_segments().and_then(|mut parts| parts.next_back()).unwrap_or("").to_ascii_lowercase();
-        let directory = if filename.ends_with(".jar") {
-            root.join("mods")
-        } else if filename.ends_with(".mrpack") {
-            root.join("downloads").join("modpacks")
-        } else if filename.ends_with(".zip") && (filename.contains("shader") || filename.contains("complementary") || filename.contains("bsl") || filename.contains(" seus")) {
-            root.join("shaderpacks")
-        } else if filename.ends_with(".zip") && (filename.contains("resource") || filename.contains("texture") || filename.contains("faithful") || filename.contains("vanilla")) {
-            root.join("resourcepacks")
-        } else {
-            root.join("downloads").join("unclassified")
-        };
+        let directory = routed_directory(&filename, &root);
         self.enqueue(url, directory)
     }
 
@@ -326,6 +334,16 @@ impl DownloadManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routes_common_minecraft_package_types_to_their_managers() {
+        let root = Path::new("/game");
+        assert_eq!(routed_directory("sodium.jar", root), root.join("mods"));
+        assert_eq!(routed_directory("faithful-resource-pack.zip", root), root.join("resourcepacks"));
+        assert_eq!(routed_directory("complementary-shaders.zip", root), root.join("shaderpacks"));
+        assert_eq!(routed_directory("pack.mrpack", root), root.join("downloads").join("modpacks"));
+        assert_eq!(routed_directory("archive.zip", root), root.join("downloads").join("unclassified"));
+    }
 
     #[test]
     fn download_state_labels_are_stable() {
