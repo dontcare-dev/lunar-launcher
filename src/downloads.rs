@@ -63,6 +63,7 @@ pub struct DownloadManager {
     receiver: Receiver<Update>,
     next_id: u64,
     history_path: Option<PathBuf>,
+    queue_lock: Arc<Mutex<()>>,
 }
 
 impl Default for DownloadManager {
@@ -80,7 +81,7 @@ impl Default for DownloadManager {
             }
         }
         let next_id = tasks.iter().map(|task| task.id).max().unwrap_or(0).saturating_add(1);
-        let manager = Self { tasks, controls: HashMap::new(), sender, receiver, next_id, history_path };
+        let manager = Self { tasks, controls: HashMap::new(), sender, receiver, next_id, history_path, queue_lock: Arc::new(Mutex::new(())) };
         manager.persist();
         manager
     }
@@ -131,9 +132,18 @@ impl DownloadManager {
         self.tasks.push(task);
         self.persist();
         let sender = self.sender.clone();
+        let queue_lock = Arc::clone(&self.queue_lock);
         std::thread::spawn(move || {
             let temporary = destination.with_extension("lunar-part");
             let result = (|| -> anyhow::Result<()> {
+                let _queue_guard = queue_lock.lock().map_err(|_| anyhow::anyhow!("Download queue was interrupted"))?;
+                {
+                    let (lock, _) = &*control;
+                    if lock.lock().map_err(|_| anyhow::anyhow!("Download control was interrupted"))?.cancelled {
+                        let _ = sender.send(Update { id, state: DownloadState::Cancelled, downloaded: 0, total: None });
+                        return Ok(());
+                    }
+                }
                 let client = reqwest::blocking::Client::builder().user_agent("Lunar-Launcher").timeout(std::time::Duration::from_secs(600)).build()?;
                 let mut response = client.get(url).send()?.error_for_status()?;
                 let total = response.content_length();
