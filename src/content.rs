@@ -511,7 +511,7 @@ pub fn analyze_instance_compatibility(instance: &Path, minecraft: &str, loader: 
         }
         if let Some(dependencies) = fabric.as_ref().and_then(|value| value.get("depends")).and_then(serde_json::Value::as_object) {
             for dependency in dependencies.keys() {
-                if !matches!(dependency.as_str(), "minecraft" | "java" | "fabricloader" | "fabric-api" | "fabric") {
+                if !matches!(dependency.as_str(), "minecraft" | "java" | "fabricloader") {
                     required_mods.push((name.clone(), dependency.clone()));
                 }
             }
