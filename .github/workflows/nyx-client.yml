@@ -50,6 +50,10 @@ jobs:
 
   build-modern:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        minecraft: ["26.1", "26.1.1", "26.1.2"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -59,13 +63,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.8.2"
-      - name: Build Nyx Client for Minecraft 26.1.2
+      - name: Build Nyx Client for Minecraft ${{ matrix.minecraft }}
         working-directory: nyx-client-modern
-        run: gradle build --no-daemon
+        run: gradle build --no-daemon -Pminecraft_version=${{ matrix.minecraft }}
       - name: Upload modern client
         uses: actions/upload-artifact@v4
         with:
-          name: nyx-client-26.1.2
+          name: nyx-client-${{ matrix.minecraft }}
           path: nyx-client-modern/build/libs/*.jar
           if-no-files-found: error
 
