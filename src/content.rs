@@ -207,7 +207,7 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
 }
 
 pub fn nyx_client_supported(minecraft: &str, loader: &str) -> bool {
-    loader == "fabric" && matches!(minecraft, "1.20.1" | "1.21.1")
+    loader == "fabric" && matches!(minecraft, "1.20.1" | "1.21.1" | "26.1.2")
 }
 
 pub fn install_nyx_client(instance: &Path, minecraft: &str, loader: &str) -> Result<String> {
