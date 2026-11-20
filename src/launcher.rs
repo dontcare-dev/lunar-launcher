@@ -594,6 +594,7 @@ pub fn launch_with_account_settings(installed: &InstalledVersion, account: &crus
     launch_with_identity(installed, &account.name, &account.uuid, memory_mb, performance_mode, Some(account), preferred_java, custom_jvm_arguments)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn launch_with_identity(installed: &InstalledVersion, username: &str, uuid: &str, memory_mb: u32, performance_mode: &str, account: Option<&crust_core::authenticator::Account>, preferred_java: Option<u32>, custom_jvm_arguments: &str) -> Result<Child> {
     let default_game_dir = installed.directory.parent().and_then(Path::parent).unwrap_or(&installed.directory);
     let game_dir = installed.game_directory.as_deref().unwrap_or(default_game_dir);
