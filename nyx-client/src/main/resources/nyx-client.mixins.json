@@ -3,7 +3,8 @@
   "package": "dev.nyx.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "GameMenuScreenMixin"
+    "GameMenuScreenMixin",
+    "ScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
