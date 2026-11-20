@@ -14,8 +14,6 @@ pub struct Skin {
     pub page: String,
     #[serde(default)]
     pub png: String,
-    #[serde(default)]
-    pub preview: String,
     #[serde(skip)]
     pub preview_rgba: Option<(usize, usize, Vec<u8>)>,
 }
