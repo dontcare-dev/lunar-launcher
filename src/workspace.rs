@@ -81,7 +81,9 @@ pub fn create_instance(root: &Path, name: &str, minecraft: &str) -> Result<Insta
 }
 
 pub fn save_instance(root: &Path, item: &Instance) -> Result<()> {
-    if item.id.is_empty() || !item.id.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') { bail!("Invalid instance identifier"); }
+    if item.id.is_empty() || item.id.len() > 80 || item.id == "." || item.id == ".."
+        || !item.id.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'.' | b'_'))
+    { bail!("Invalid instance identifier"); }
     let path = root.join("instances").join(&item.id);
     fs::create_dir_all(&path)?;
     let temporary = metadata_path(&path).with_extension("tmp");
