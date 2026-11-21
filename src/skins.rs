@@ -64,6 +64,14 @@ pub fn search(query: &str) -> Result<Vec<Skin>> {
     Ok(skins)
 }
 
+pub fn validate_skin(image: &image::RgbaImage) -> Result<()> {
+    let (width, height) = image.dimensions();
+    if !((width == 64 && height == 64) || (width == 64 && height == 32)) {
+        bail!("Unsupported skin dimensions: {width}×{height}. Use a 64×64 or 64×32 Minecraft skin.");
+    }
+    Ok(())
+}
+
 pub fn download(skin: &Skin) -> Result<image::RgbaImage> {
     let client = reqwest::blocking::Client::builder()
         .user_agent(concat!("LUNAR/", env!("CARGO_PKG_VERSION")))
@@ -77,5 +85,23 @@ pub fn download(skin: &Skin) -> Result<image::RgbaImage> {
     let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
         .context("Catalogue did not return a valid PNG skin")?
         .to_rgba8();
+    validate_skin(&image)?;
     Ok(image)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_supported_skin_layouts() {
+        assert!(validate_skin(&image::RgbaImage::new(64, 64)).is_ok());
+        assert!(validate_skin(&image::RgbaImage::new(64, 32)).is_ok());
+    }
+
+    #[test]
+    fn rejects_unsupported_skin_dimensions() {
+        assert!(validate_skin(&image::RgbaImage::new(128, 128)).is_err());
+        assert!(validate_skin(&image::RgbaImage::new(64, 128)).is_err());
+    }
 }
