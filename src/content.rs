@@ -110,10 +110,15 @@ pub fn project_is_installed(root: &Path, kind: &str, project_id: &str) -> bool {
 }
 
 pub fn search(query: &str, kind: &str) -> Result<Vec<Project>> {
+    search_sorted(query, kind, "relevance")
+}
+
+pub fn search_sorted(query: &str, kind: &str, sort: &str) -> Result<Vec<Project>> {
     if !matches!(kind, "modpack" | "resourcepack" | "mod" | "shader") { bail!("Unsupported Modrinth project type"); }
+    let sort = if matches!(sort, "downloads" | "follows" | "updated") { sort } else { "relevance" };
     let facets = format!("[[\"project_type:{kind}\"]]");
     let response = client()?.get(format!("{API}/search"))
-        .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30")])
+        .query(&[("query", query), ("facets", facets.as_str()), ("limit", "30"), ("index", sort)])
         .send()?.error_for_status()?.json::<serde_json::Value>()?;
     let mut projects: Vec<Project> = serde_json::from_value(response.get("hits").cloned().unwrap_or_default())?;
     let http = client()?;
