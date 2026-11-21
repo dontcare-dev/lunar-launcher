@@ -336,17 +336,19 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
     if slug.is_empty() { bail!("The modpack name is invalid"); }
     let instance = root.join("modpacks").join(format!("{slug}-{}", manifest.version_id)).join("instance");
     fs::create_dir_all(&instance)?;
-    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index)?;
-        let entry_name = entry.name().to_owned();
-        if let Some(relative) = entry_name.strip_prefix("overrides/").filter(|relative| !relative.is_empty()) {
-            let destination = instance.join(safe_relative(relative)?);
-            if entry.is_dir() { fs::create_dir_all(destination)?; }
-            else {
-                if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
-                let mut output = fs::File::create(destination)?;
-                std::io::copy(&mut entry, &mut output)?;
+    for prefix in ["overrides/", "client-overrides/"] {
+        let mut overrides = ZipArchive::new(Cursor::new(bytes))?;
+        for index in 0..overrides.len() {
+            let mut entry = overrides.by_index(index)?;
+            let entry_name = entry.name().to_owned();
+            if let Some(relative) = entry_name.strip_prefix(prefix).filter(|relative| !relative.is_empty()) {
+                let destination = instance.join(safe_relative(relative)?);
+                if entry.is_dir() { fs::create_dir_all(destination)?; }
+                else {
+                    if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
+                    let mut output = fs::File::create(destination)?;
+                    std::io::copy(&mut entry, &mut output)?;
+                }
             }
         }
     }
