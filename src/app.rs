@@ -1398,7 +1398,7 @@ impl LunarApp {
         }
         ui.horizontal_wrapped(|ui| {
             Self::svg_icon(ui, "bytes://lunar-search.svg", include_bytes!("../assets/icons/search.svg"), 18.0);
-            ui.add_sized([ui.available_width().min(330.0).max(150.0), 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
+            ui.add_sized([ui.available_width().clamp(150.0, 330.0), 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
             if self.content_kind == "modpack" {
                 egui::ComboBox::from_id_salt("modpack_browser_sort")
                     .selected_text(match self.content_sort.as_str() { "downloads" => "Most downloaded", "follows" => "Most followed", "updated" => "Recently updated", _ => "Relevance" })
