@@ -1438,8 +1438,16 @@ impl LunarApp {
                         _ => "shaderpacks",
                     };
                     let extensions: &[&str] = if self.content_kind == "mod" { &["jar"] } else { &["zip"] };
-                    match crate::workspace::import_content_file(&source, &content_root.join(folder), extensions) {
-                        Ok(destination) => self.status = format!("Imported {}", destination.file_name().unwrap_or_default().to_string_lossy()),
+                    let imported = if self.content_kind == "resourcepack" {
+                        crate::content::import_pack_file(&source, &content_root, "resourcepacks", "resource pack")
+                    } else if self.content_kind == "shader" {
+                        crate::content::import_pack_file(&source, &content_root, "shaderpacks", "shader pack")
+                    } else {
+                        crate::workspace::import_content_file(&source, &content_root.join(folder), extensions)
+                            .map(|path| path.display().to_string())
+                    };
+                    match imported {
+                        Ok(path) => self.status = format!("Imported {path}"),
                         Err(error) => self.status = error.to_string(),
                     }
                 }
