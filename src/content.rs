@@ -875,6 +875,21 @@ mod tests {
     }
 
     #[test]
+    fn modpack_client_overrides_take_precedence_over_common_overrides() {
+        let manifest = br#"{"name":"Override Test","versionId":"1","dependencies":{"minecraft":"1.20.1"},"files":[]}"#;
+        let bytes = make_test_zip(&[
+            ("modrinth.index.json", manifest),
+            ("overrides/config/example.txt", b"common"),
+            ("client-overrides/config/example.txt", b"client"),
+        ]);
+        let root = std::env::temp_dir().join(format!("lunar-mrpack-overrides-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let instance = PathBuf::from(install_modpack_bytes(&bytes, &root).unwrap());
+        assert_eq!(fs::read_to_string(instance.join("config/example.txt")).unwrap(), "client");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn resource_pack_archive_strips_wrapper_folder_even_with_macos_metadata() {
         let bytes = make_test_zip(&[
             ("ExamplePack/pack.mcmeta", br#"{"pack":{"pack_format":15,"description":"test"}}"#),
