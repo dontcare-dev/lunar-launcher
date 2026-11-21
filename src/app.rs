@@ -85,7 +85,7 @@ enum Screen {
 type ServerPingResults = Vec<(String, Result<crate::server::ServerStatus, String>)>;
 type BackgroundFrames = Vec<(egui::ColorImage, u64)>;
 type BackgroundLoadResult = Result<BackgroundFrames, String>;
-type SkinApplyResult = Result<(String, image::RgbaImage, PathBuf), String>;
+type SkinApplyResult = Result<(String, image::RgbaImage, PathBuf, InstalledVersion), String>;
 type NavigationItem = (&'static str, Screen, &'static str, &'static [u8]);
 type SkinTexturedFace = (f32, [egui::Pos2; 4], (u32, u32, u32, u32));
 enum MicrosoftLoginEvent {
@@ -1555,12 +1555,13 @@ impl LunarApp {
                                             "resourcepack" => crate::content::install_resource_pack(&id, target, &minecraft)?,
                                             "shader" => crate::content::install_shader_pack(&id, target, &minecraft)?,
                                             "mod" => {
+                                                crate::loaders::prepare_instance(&minecraft, Some(&loader), &root, target)
+                                                    .context("Could not prepare the selected mod loader")?;
                                                 crate::content::install_mod(&id, target, &minecraft, &loader)?;
                                                 if let Some(instance) = selected_instance {
                                                     let mut updated = instance;
                                                     updated.loader = Some(loader.clone());
                                                     crate::workspace::save_instance(&root, &updated)?;
-                                                    crate::loaders::prepare_instance(&minecraft, Some(&loader), &root, target)?;
                                                 }
                                                 format!("Installed mod and required dependencies to {}", target.display())
                                             }
@@ -2199,7 +2200,10 @@ impl LunarApp {
         }
         if let Some(rx) = &self.skin_apply_rx {
             match rx.try_recv() {
-                Ok(Ok((name, image, path))) => {
+                Ok(Ok((name, image, path, installed))) => {
+                    self.selected_version = installed.id.clone();
+                    self.installed_ids.insert(installed.id.clone());
+                    self.installed_version = Some(installed);
                     self.skin_editor = Some(image);
                     self.skin_editor_profile = selected.clone();
                     self.status = format!("{name} installed with CustomSkinLoader at {}", path.display());
@@ -2278,9 +2282,10 @@ impl LunarApp {
                             if ui.add_enabled(self.skin_apply_rx.is_none(), egui::Button::new("Preview & install")).clicked() {
                                 let instance = self.workspace_instances.iter()
                                     .find(|instance| Some(instance.id.as_str()) == self.workspace_selected.as_deref()).cloned();
-                                let root = instance.as_ref()
-                                    .map(|instance| crate::workspace::instance_path(&self.game_root, instance))
-                                    .unwrap_or_else(|| self.game_root.clone());
+                                let game_root = self.game_root.clone();
+                                let target = instance.as_ref()
+                                    .map(|instance| crate::workspace::instance_path(&game_root, instance))
+                                    .unwrap_or_else(|| game_root.join("instances").join(format!("skin-manager-{}", self.selected_version)));
                                 let minecraft = instance.as_ref().map(|instance| instance.minecraft.clone())
                                     .filter(|version| !version.is_empty()).unwrap_or_else(|| self.selected_version.clone());
                                 let loader = instance.as_ref().and_then(|instance| instance.loader.clone())
@@ -2290,18 +2295,24 @@ impl LunarApp {
                                 self.skin_apply_rx = Some(rx);
                                 self.status = format!("Installing {} and preparing CustomSkinLoader…", skin.name);
                                 std::thread::spawn(move || {
-                                    let result = (|| -> anyhow::Result<(String, image::RgbaImage, PathBuf)> {
+                                    let result = (|| -> anyhow::Result<(String, image::RgbaImage, PathBuf, InstalledVersion)> {
                                         let image = crate::skins::download(&skin)?;
                                         let (width, height) = image.dimensions();
                                         if !((width == 64 && height == 64) || (width == 64 && height == 32)) {
                                             anyhow::bail!("Unsupported skin dimensions: {width}×{height}");
                                         }
-                                        crate::content::install_mod("customskinloader", &root, &minecraft, &loader)
+                                        let installed = crate::loaders::prepare_instance(&minecraft, Some(&loader), &game_root, &target)
+                                            .context("Could not prepare a compatible modded Minecraft profile")?;
+                                        crate::content::install_mod("customskinloader", &target, &minecraft, &loader)
                                             .context("Could not install the required CustomSkinLoader mod")?;
-                                        let destination = root.join("CustomSkinLoader").join("LocalSkin").join("skins").join(format!("{profile}.png"));
+                                        if let Some(mut instance) = instance {
+                                            instance.loader = Some(loader.clone());
+                                            crate::workspace::save_instance(&game_root, &instance)?;
+                                        }
+                                        let destination = target.join("CustomSkinLoader").join("LocalSkin").join("skins").join(format!("{profile}.png"));
                                         if let Some(parent) = destination.parent() { fs::create_dir_all(parent)?; }
                                         image.save(&destination)?;
-                                        Ok((skin.name, image, destination))
+                                        Ok((skin.name, image, destination, installed))
                                     })().map_err(|error| format!("{error:#}"));
                                     let _ = tx.send(result);
                                 });
@@ -2792,6 +2803,18 @@ impl eframe::App for LunarApp {
             if let Some(id) = self.active_content_task.take() { self.downloads.finish_operation(id, operation_result); }
             match result {
                 Ok(path) => {
+                    if self.content_kind == "mod" {
+                        let minecraft = self.selected_version.clone();
+                        let loader = self.content_loader.clone();
+                        if let Ok(ids) = launcher::installed_versions(&self.game_root)
+                            && let Some(id) = ids.into_iter().find(|id| id.contains(&minecraft) && id.to_ascii_lowercase().contains(&loader.to_ascii_lowercase()))
+                            && let Ok(installed) = launcher::load_installed(&id, &self.game_root)
+                        {
+                            self.selected_version = installed.id.clone();
+                            self.installed_ids.insert(installed.id.clone());
+                            self.installed_version = Some(installed);
+                        }
+                    }
                     self.status = format!("Installed to {path}");
                     self.installed_packs = crate::content::installed_modpacks(&self.game_root).unwrap_or_default();
                     self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
