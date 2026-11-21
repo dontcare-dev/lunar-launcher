@@ -1810,7 +1810,17 @@ impl LunarApp {
                 let (tx, rx) = mpsc::channel();
                 self.server_rx = Some(rx);
                 std::thread::spawn(move || {
-                    let results = servers.iter().map(|server| (server.address.clone(), crate::server::ping(server).map_err(|error| error.to_string()))).collect();
+                    let (result_tx, result_rx) = mpsc::channel();
+                    let count = servers.len();
+                    for server in servers {
+                        let result_tx = result_tx.clone();
+                        std::thread::spawn(move || {
+                            let result = crate::server::ping(&server).map_err(|error| error.to_string());
+                            let _ = result_tx.send((server.address, result));
+                        });
+                    }
+                    drop(result_tx);
+                    let results = result_rx.into_iter().take(count).collect();
                     let _ = tx.send(results);
                 });
             }
@@ -1831,6 +1841,10 @@ impl LunarApp {
                         } else { ui.label(RichText::new("Not checked").size(11.0).color(Color32::GRAY)); }
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Copy address").clicked() {
+                            ui.ctx().copy_text(server.address.clone());
+                            self.status = format!("Copied {}", server.address);
+                        }
                         if ui.small_button("Remove").clicked() {
                             self.servers.retain(|saved| saved.address != server.address);
                             self.server_statuses.remove(&server.address);
