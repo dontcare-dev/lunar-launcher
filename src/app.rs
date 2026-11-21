@@ -732,7 +732,7 @@ impl LunarApp {
             self.screen = Screen::Profiles;
             return;
         };
-        let installed = match self.installed_version.clone() {
+        let mut installed = match self.installed_version.clone() {
             Some(installed) if installed.id == self.selected_version
                 || installed.metadata.get("inheritsFrom").and_then(serde_json::Value::as_str) == Some(self.selected_version.as_str()) => installed,
             _ => {
@@ -754,16 +754,45 @@ impl LunarApp {
                 }
             }
         };
+        if let Some(instance) = self.workspace_instances.iter()
+            .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()).cloned()
+        {
+            let target = crate::workspace::instance_path(&self.game_root, &instance);
+            match crate::loaders::prepare_instance(&instance.minecraft, instance.loader.as_deref(), &self.game_root, &target) {
+                Ok(prepared) => installed = prepared,
+                Err(error) => {
+                    self.status = format!("Could not prepare selected instance: {error:#}");
+                    return;
+                }
+            }
+            installed.game_directory = Some(target);
+        }
         if self.auto_sodium && installed.game_directory.is_none() {
             let minecraft = self.selected_version.clone();
             let root = self.game_root.clone();
-            let instance = root.join("instances").join(format!("sodium-{minecraft}"));
+            let instance_id = format!("sodium-{minecraft}");
+            let instance = root.join("instances").join(&instance_id);
+            let workspace_instance = crate::workspace::Instance {
+                id: instance_id.clone(),
+                name: format!("Sodium {minecraft}"),
+                minecraft: minecraft.clone(),
+                memory_mb: self.memory_mb,
+                java_major: None,
+                created_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                last_played: None,
+                play_count: 0,
+                loader: Some("fabric".into()),
+                performance_mode: self.performance_mode.clone(),
+                jvm_arguments: String::new(),
+                backup_on_exit: true,
+            };
             let (tx, rx) = mpsc::channel();
             self.modpack_launch_rx = Some(rx);
             self.active_modpack_task = Some(self.downloads.begin_operation(&format!("Prepare Fabric + Sodium · {minecraft}"), instance.clone()));
             self.status = format!("Preparing Fabric + Sodium for Minecraft {minecraft}…");
             std::thread::spawn(move || {
                 let result = (|| -> anyhow::Result<InstalledVersion> {
+                    crate::workspace::save_instance(&root, &workspace_instance)?;
                     let installed = crate::loaders::install_fabric_profile(&minecraft, &root, &instance)?;
                     crate::content::install_mod("AANobbMI", &instance, &minecraft, "fabric")?;
                     Ok(installed)
@@ -1338,6 +1367,7 @@ impl LunarApp {
         let content_root = self.workspace_instances.iter()
             .find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref())
             .map(|entry| crate::workspace::instance_path(&self.game_root, entry))
+            .or_else(|| self.installed_version.as_ref().and_then(|version| version.game_directory.clone()))
             .unwrap_or_else(|| self.game_root.clone());
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.content_kind, "modpack".into(), "Modpacks");
@@ -1577,7 +1607,8 @@ impl LunarApp {
                                     .unwrap_or_else(|| self.selected_version.clone());
                                 let loader = self.content_loader.clone();
                                 let instance_target = selected_instance.as_ref()
-                                    .map(|entry| crate::workspace::instance_path(&self.game_root, entry));
+                                    .map(|entry| crate::workspace::instance_path(&self.game_root, entry))
+                                    .or_else(|| self.installed_version.as_ref().and_then(|version| version.game_directory.clone()));
                                 let (tx, rx) = mpsc::channel();
                                 self.content_install_rx = Some(rx);
                                 self.active_content_task = Some(self.downloads.begin_operation("Install Modrinth content", root.clone()));
@@ -2355,6 +2386,7 @@ impl LunarApp {
                                 let game_root = self.game_root.clone();
                                 let target = instance.as_ref()
                                     .map(|instance| crate::workspace::instance_path(&game_root, instance))
+                                    .or_else(|| self.installed_version.as_ref().and_then(|version| version.game_directory.clone()))
                                     .unwrap_or_else(|| game_root.clone());
                                 let minecraft = instance.as_ref().map(|instance| instance.minecraft.clone())
                                     .filter(|version| !version.is_empty()).unwrap_or_else(|| self.selected_version.clone());
