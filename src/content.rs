@@ -858,6 +858,46 @@ pub fn set_resource_pack_enabled(root: &Path, filename: &str, enabled: bool) -> 
 mod tests {
     use super::*;
 
+    fn make_test_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut output = Cursor::new(Vec::new());
+        {
+            let mut writer = ZipWriter::new(&mut output);
+            for (name, bytes) in entries {
+                writer.start_file(*name, SimpleFileOptions::default()).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        output.into_inner()
+    }
+
+    #[test]
+    fn resource_pack_archive_strips_wrapper_folder_even_with_macos_metadata() {
+        let bytes = make_test_zip(&[
+            ("ExamplePack/pack.mcmeta", br#"{"pack":{"pack_format":15,"description":"test"}}"#),
+            ("ExamplePack/assets/minecraft/lang/en_us.json", b"{}"),
+            ("__MACOSX/._ExamplePack", b"metadata"),
+        ]);
+        let normalized = normalize_pack_archive(&bytes, "resource pack").unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(normalized)).unwrap();
+        assert!(archive.by_name("pack.mcmeta").is_ok());
+        assert!(archive.by_name("assets/minecraft/lang/en_us.json").is_ok());
+        assert!(archive.by_name("ExamplePack/pack.mcmeta").is_err());
+    }
+
+    #[test]
+    fn shader_archive_strips_wrapper_folder() {
+        let bytes = make_test_zip(&[
+            ("BSL/shaders/program/gbuffers_basic.fsh", b"shader"),
+            ("BSL/shaders/shaders.properties", b""),
+        ]);
+        let normalized = normalize_pack_archive(&bytes, "shader pack").unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(normalized)).unwrap();
+        assert!(archive.by_name("shaders/program/gbuffers_basic.fsh").is_ok());
+        assert!(archive.by_name("shaders/shaders.properties").is_ok());
+    }
+
     #[test]
     fn safe_filename_rejects_paths() {
         assert!(safe_filename("valid-pack.zip").is_ok());
