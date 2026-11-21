@@ -75,7 +75,7 @@ fn safe_instance_component(value: &str) -> Result<&str> {
         || value.len() > 80
         || value == "."
         || value == ".."
-        || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'+'))
     {
         bail!("The modpack manifest contains an unsafe instance identifier");
     }
@@ -962,7 +962,7 @@ mod tests {
         assert!(safe_instance_component("C:outside").is_err());
         assert!(safe_instance_component("..").is_err());
         assert!(safe_instance_component(&"x".repeat(81)).is_err());
-        assert!(safe_instance_component("1.20.1+build_2").is_err());
+        assert_eq!(safe_instance_component("1.20.1+build_2").unwrap(), "1.20.1+build_2");
         assert_eq!(safe_instance_component("1.20.1-build_2").unwrap(), "1.20.1-build_2");
     }
 
