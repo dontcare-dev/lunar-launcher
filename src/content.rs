@@ -252,6 +252,31 @@ fn save_project_file(project_id: &str, root: &Path, folder: &str, kind: &str, ga
     Ok(destination.display().to_string())
 }
 
+pub fn import_pack_file(source: &Path, root: &Path, folder: &str, kind: &str) -> Result<String> {
+    if !source.is_file() { bail!("Selected package file was not found"); }
+    let filename = source.file_name().and_then(|name| name.to_str()).context("Selected package has no valid filename")?;
+    safe_filename(filename)?;
+    if !filename.to_ascii_lowercase().ends_with(".zip") { bail!("The selected {kind} must be a ZIP archive"); }
+    let original = fs::read(source)?;
+    let bytes = normalize_pack_archive(&original, kind)?;
+    let directory = root.join(folder);
+    fs::create_dir_all(&directory)?;
+    let mut destination = directory.join(filename);
+    if destination.exists() {
+        let stem = Path::new(filename).file_stem().and_then(|value| value.to_str()).unwrap_or("pack");
+        let mut suffix = 2usize;
+        loop {
+            destination = directory.join(format!("{stem}-{suffix}.zip"));
+            if !destination.exists() { break; }
+            suffix += 1;
+        }
+    }
+    let temporary = destination.with_extension("zip.lunar-download");
+    fs::write(&temporary, bytes)?;
+    fs::rename(&temporary, &destination)?;
+    Ok(destination.display().to_string())
+}
+
 pub fn install_resource_pack(project_id: &str, root: &Path, _minecraft: &str) -> Result<String> {
     save_project_file(project_id, root, "resourcepacks", "resource pack", None, None)
 }
