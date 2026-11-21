@@ -2248,9 +2248,26 @@ impl LunarApp {
     fn skin_manager_ui(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Skin Manager", "Browse, preview and install community Minecraft skins.");
         let selected = self.profiles.selected.clone().unwrap_or_default();
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Import local skin PNG").clicked()
+                && let Some(path) = Self::choose_content_file("skin")
+            {
+                match image::open(&path).map(|image| image.to_rgba8())
+                    .map_err(|error| error.to_string())
+                    .and_then(|image| {
+                        crate::skins::validate_skin(&image).map(|()| image).map_err(|error| error.to_string())
+                    })
+                {
+                    Ok(image) => {
+                        self.skin_editor = Some(image);
+                        self.status = format!("Loaded skin preview from {}", path.display());
+                    }
+                    Err(error) => self.status = format!("Could not load skin: {error}"),
+                }
+            }
+        });
         if selected.is_empty() {
-            ui.label(RichText::new("Select a Minecraft profile before installing a skin.").color(Color32::LIGHT_RED));
-            return;
+            ui.label(RichText::new("Select a Minecraft profile to install a skin. You can still import and inspect local skins here.").color(Color32::GRAY));
         }
         if let Some(rx) = &self.skin_apply_rx {
             match rx.try_recv() {
@@ -2332,7 +2349,7 @@ impl LunarApp {
                             ui.hyperlink_to("Creator / source", &skin.page);
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add_enabled(self.skin_apply_rx.is_none(), egui::Button::new("Preview & install")).clicked() {
+                            if ui.add_enabled(self.skin_apply_rx.is_none() && !selected.is_empty(), egui::Button::new("Preview & install")).clicked() {
                                 let instance = self.workspace_instances.iter()
                                     .find(|instance| Some(instance.id.as_str()) == self.workspace_selected.as_deref()).cloned();
                                 let game_root = self.game_root.clone();
@@ -2350,10 +2367,7 @@ impl LunarApp {
                                 std::thread::spawn(move || {
                                     let result = (|| -> anyhow::Result<(String, image::RgbaImage, PathBuf, InstalledVersion)> {
                                         let image = crate::skins::download(&skin)?;
-                                        let (width, height) = image.dimensions();
-                                        if !((width == 64 && height == 64) || (width == 64 && height == 32)) {
-                                            anyhow::bail!("Unsupported skin dimensions: {width}×{height}");
-                                        }
+                                        crate::skins::validate_skin(&image)?;
                                         let installed = crate::loaders::prepare_instance(&minecraft, Some(&loader), &game_root, &target)
                                             .context("Could not prepare a compatible modded Minecraft profile")?;
                                         crate::content::install_mod("customskinloader", &target, &minecraft, &loader)
