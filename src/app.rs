@@ -729,14 +729,26 @@ impl LunarApp {
             return;
         };
         let installed = match self.installed_version.clone() {
-            Some(installed) if installed.id == self.selected_version => installed,
-            _ => match launcher::load_installed(&self.selected_version, &self.game_root) {
-                Ok(installed) => installed,
-                Err(error) => {
-                    self.status = error.to_string();
-                    return;
+            Some(installed) if installed.id == self.selected_version
+                || installed.metadata.get("inheritsFrom").and_then(serde_json::Value::as_str) == Some(self.selected_version.as_str()) => installed,
+            _ => {
+                let loader_profile = launcher::installed_versions(&self.game_root).ok()
+                    .and_then(|ids| ids.into_iter().find(|id| {
+                        id.contains(&self.selected_version)
+                            && id.to_ascii_lowercase().contains(&self.content_loader.to_ascii_lowercase())
+                            && id != &self.selected_version
+                    }));
+                match loader_profile.and_then(|id| launcher::load_installed(&id, &self.game_root).ok()) {
+                    Some(installed) => installed,
+                    None => match launcher::load_installed(&self.selected_version, &self.game_root) {
+                        Ok(installed) => installed,
+                        Err(error) => {
+                            self.status = error.to_string();
+                            return;
+                        }
+                    },
                 }
-            },
+            }
         };
         if self.auto_sodium && installed.game_directory.is_none() {
             let minecraft = self.selected_version.clone();
@@ -2209,8 +2221,7 @@ impl LunarApp {
         if let Some(rx) = &self.skin_apply_rx {
             match rx.try_recv() {
                 Ok(Ok((name, image, path, installed))) => {
-                    self.selected_version = installed.id.clone();
-                    self.installed_ids.insert(installed.id.clone());
+                    self.installed_ids = launcher::installed_versions(&self.game_root).unwrap_or_default();
                     self.installed_version = Some(installed);
                     self.skin_editor = Some(image);
                     self.skin_editor_profile = selected.clone();
@@ -2293,7 +2304,7 @@ impl LunarApp {
                                 let game_root = self.game_root.clone();
                                 let target = instance.as_ref()
                                     .map(|instance| crate::workspace::instance_path(&game_root, instance))
-                                    .unwrap_or_else(|| game_root.join("instances").join(format!("skin-manager-{}", self.selected_version)));
+                                    .unwrap_or_else(|| game_root.clone());
                                 let minecraft = instance.as_ref().map(|instance| instance.minecraft.clone())
                                     .filter(|version| !version.is_empty()).unwrap_or_else(|| self.selected_version.clone());
                                 let loader = instance.as_ref().and_then(|instance| instance.loader.clone())
@@ -2814,13 +2825,18 @@ impl eframe::App for LunarApp {
                     if self.content_kind == "mod" {
                         let minecraft = self.selected_version.clone();
                         let loader = self.content_loader.clone();
-                        if let Ok(ids) = launcher::installed_versions(&self.game_root)
-                            && let Some(id) = ids.into_iter().find(|id| id.contains(&minecraft) && id.to_ascii_lowercase().contains(&loader.to_ascii_lowercase()))
-                            && let Ok(installed) = launcher::load_installed(&id, &self.game_root)
-                        {
-                            self.selected_version = installed.id.clone();
-                            self.installed_ids.insert(installed.id.clone());
-                            self.installed_version = Some(installed);
+                        if let Ok(ids) = launcher::installed_versions(&self.game_root) {
+                            self.installed_ids = ids.clone();
+                            if let Some(id) = ids.into_iter().find(|id| id.contains(&minecraft) && id.to_ascii_lowercase().contains(&loader.to_ascii_lowercase()) && id != &minecraft)
+                                && let Ok(mut installed) = launcher::load_installed(&id, &self.game_root)
+                            {
+                                if let Some(instance) = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()) {
+                                    installed.game_directory = Some(crate::workspace::instance_path(&self.game_root, instance));
+                                } else {
+                                    installed.game_directory = Some(self.game_root.clone());
+                                }
+                                self.installed_version = Some(installed);
+                            }
                         }
                     }
                     self.status = format!("Installed to {path}");
