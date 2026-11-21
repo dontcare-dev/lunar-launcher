@@ -217,7 +217,7 @@ impl LunarApp {
         let java_status = launcher::detect_java().unwrap_or_else(|_| "No system Java found. Lunar will download the compatible runtime automatically when Minecraft launches.".into());
         let preferences = LauncherPreferences::load();
         let workspace_instances = crate::workspace::list_instances(&game_root).unwrap_or_default();
-        let workspace_selected = workspace_instances.first().map(|instance| instance.id.clone());
+        let workspace_selected = None;
         let mut app = Self {
             profiles: ProfileStore::load(),
             screen: Screen::Home,
@@ -578,18 +578,6 @@ impl LunarApp {
                 let target = egui::Rect::from_center_size(rect.center(), size * scale);
                 painter.image(texture.id(), target, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
-        } else {
-            let center = rect.center();
-            let pulse = (elapsed * 2.4).sin() * 0.5 + 0.5;
-            painter.circle_filled(center, 54.0 + pulse * 8.0, Color32::from_rgba_unmultiplied(111, 139, 255, 22));
-            painter.circle_stroke(center, 72.0 + pulse * 5.0, Stroke::new(1.2_f32, Color32::from_rgba_unmultiplied(145, 169, 255, 70)));
-            painter.circle_stroke(center, 91.0 + pulse * 7.0, Stroke::new(0.8_f32, Color32::from_rgba_unmultiplied(145, 169, 255, 35)));
-            painter.circle_filled(center + egui::vec2((elapsed * 0.8).cos() * 78.0, (elapsed * 0.8).sin() * 78.0), 3.0, Color32::from_rgb(190, 207, 255));
-            let moon = center + egui::vec2(-15.0, -18.0);
-            painter.circle_filled(moon, 36.0, Color32::from_rgb(174, 195, 255));
-            painter.circle_filled(moon + egui::vec2(18.0, -12.0), 32.0, Color32::from_rgb(7, 11, 23));
-            painter.text(center + egui::vec2(0.0, 116.0), egui::Align2::CENTER_CENTER, "Lunar Launcher", FontId::proportional(23.0), Color32::WHITE);
-            painter.text(center + egui::vec2(0.0, 148.0), egui::Align2::CENTER_CENTER, "Loading", FontId::proportional(12.0), Color32::from_rgb(151, 165, 195));
         }
         ctx.request_repaint_after(Duration::from_millis(16));
     }
@@ -894,25 +882,7 @@ impl LunarApp {
 
     fn home(&mut self, ui: &mut egui::Ui) {
         Self::heading(ui, "Welcome to Lunar Launcher", "Your Minecraft setup, without the clutter.");
-        egui::Frame::new()
-            .fill(Color32::from_rgba_unmultiplied(23, 31, 47, 158))
-            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(53, 68, 94)))
-            .corner_radius(egui::CornerRadius::same(18))
-            .inner_margin(egui::Margin::same(28))
-            .show(ui, |ui| {
-                ui.set_min_height(220.0);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("MINECRAFT JAVA EDITION").size(10.0).strong().color(self.accent));
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("A world of your own.").size(31.0).strong());
-                    ui.label(RichText::new("A faster, cleaner way to get into the game.").color(Color32::from_rgb(174, 186, 208)));
-                    ui.add_space(26.0);
-                    if ui.add_sized([170.0, 44.0], egui::Button::new(RichText::new("Open Play").strong()).fill(Color32::from_rgb(78, 111, 171))).clicked() {
-                        self.screen = Screen::Play;
-                    }
-                });
-            });
-        ui.add_space(20.0);
+        ui.add_space(8.0);
         let featured: Vec<_> = self.content_results.iter().take(4).map(|project| (
             project.project_id.clone(),
             project.title.clone(),
