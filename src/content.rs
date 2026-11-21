@@ -70,6 +70,18 @@ fn client() -> Result<reqwest::blocking::Client> {
         .build()?)
 }
 
+fn safe_instance_component(value: &str) -> Result<&str> {
+    if value.is_empty()
+        || value.len() > 80
+        || value == "."
+        || value == ".."
+        || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        bail!("The modpack manifest contains an unsafe instance identifier");
+    }
+    Ok(value)
+}
+
 fn safe_relative(value: &str) -> Result<PathBuf> {
     let path = Path::new(value);
     if path.as_os_str().is_empty() || path.is_absolute()
@@ -336,10 +348,11 @@ pub fn install_modpack_bytes(bytes: &[u8], root: &Path) -> Result<String> {
     drop(manifest_file);
     let manifest: PackManifest = serde_json::from_slice(&manifest_bytes).context("Modpack manifest is invalid")?;
     if !manifest.dependencies.contains_key("minecraft") { bail!("The modpack does not specify a Minecraft version"); }
-    let slug: String = manifest.name.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' }).collect();
+    let version_id = safe_instance_component(&manifest.version_id)?;
+    let slug: String = manifest.name.chars().take(64).map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' }).collect();
     let slug = slug.split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
     if slug.is_empty() { bail!("The modpack name is invalid"); }
-    let instance = root.join("modpacks").join(format!("{slug}-{}", manifest.version_id)).join("instance");
+    let instance = root.join("modpacks").join(format!("{slug}-{version_id}")).join("instance");
     fs::create_dir_all(&instance)?;
     for prefix in ["overrides/", "client-overrides/"] {
         let mut overrides = ZipArchive::new(Cursor::new(bytes))?;
@@ -942,6 +955,17 @@ mod tests {
         assert!(options.contains("incompatibleResourcePacks:[]"));
         let _ = fs::remove_dir_all(root);
     }
+    #[test]
+    fn modpack_instance_identifier_rejects_path_traversal() {
+        assert!(safe_instance_component("../outside").is_err());
+        assert!(safe_instance_component("nested/name").is_err());
+        assert!(safe_instance_component("C:outside").is_err());
+        assert!(safe_instance_component("..").is_err());
+        assert!(safe_instance_component(&"x".repeat(81)).is_err());
+        assert_eq!(safe_instance_component("1.20.1+build_2").is_err(), true);
+        assert_eq!(safe_instance_component("1.20.1-build_2").unwrap(), "1.20.1-build_2");
+    }
+
     #[test]
     fn safe_relative_accepts_nested_normal_paths() {
         assert_eq!(safe_relative("overrides/config/example.json").unwrap(), PathBuf::from("overrides/config/example.json"));
