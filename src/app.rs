@@ -134,6 +134,7 @@ pub struct LunarApp {
     content_results_kind: String,
     content_search_kind: String,
     content_query: String,
+    content_sort: String,
     content_results: Vec<crate::content::Project>,
     content_images: std::collections::BTreeMap<String, egui::TextureHandle>,
     content_busy: bool,
@@ -176,6 +177,7 @@ pub struct LunarApp {
     skin_editor: Option<image::RgbaImage>,
     skin_editor_profile: String,
     skin_rotation: f32,
+    skin_zoom: f32,
     skin_preview_texture: Option<egui::TextureHandle>,
     downloads: crate::downloads::DownloadManager,
     download_url: String,
@@ -256,6 +258,7 @@ impl LunarApp {
             content_results_kind: "modpack".into(),
             content_search_kind: "modpack".into(),
             content_query: String::new(),
+            content_sort: "relevance".into(),
             content_results: Vec::new(),
             content_images: std::collections::BTreeMap::new(),
             content_busy: false,
@@ -298,6 +301,7 @@ impl LunarApp {
             skin_editor: None,
             skin_editor_profile: String::new(),
             skin_rotation: 0.45,
+            skin_zoom: 1.0,
             skin_preview_texture: None,
             downloads: crate::downloads::DownloadManager::default(),
             download_url: String::new(),
@@ -1392,12 +1396,23 @@ impl LunarApp {
             });
             ui.label(RichText::new("Sodium is the recommended Intel iGPU option. OptiFine is a separate alternative and should not be installed alongside Sodium.").size(10.0).color(Color32::from_rgb(170, 180, 201)));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             Self::svg_icon(ui, "bytes://lunar-search.svg", include_bytes!("../assets/icons/search.svg"), 18.0);
-            ui.add_sized([336.0, 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
+            ui.add_sized([ui.available_width().min(330.0).max(150.0), 32.0], egui::TextEdit::singleline(&mut self.content_query).hint_text("Search Modrinth"));
+            if self.content_kind == "modpack" {
+                egui::ComboBox::from_id_salt("modpack_browser_sort")
+                    .selected_text(match self.content_sort.as_str() { "downloads" => "Most downloaded", "follows" => "Most followed", "updated" => "Recently updated", _ => "Relevance" })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.content_sort, "relevance".into(), "Relevance");
+                        ui.selectable_value(&mut self.content_sort, "downloads".into(), "Most downloaded");
+                        ui.selectable_value(&mut self.content_sort, "follows".into(), "Most followed");
+                        ui.selectable_value(&mut self.content_sort, "updated".into(), "Recently updated");
+                    });
+            }
             if ui.add_enabled(!self.content_busy, egui::Button::new("Search")).clicked() {
                 let query = self.content_query.clone();
                 let kind = self.content_kind.clone();
+                let sort = if kind == "modpack" { self.content_sort.clone() } else { "relevance".into() };
                 let (tx, rx) = mpsc::channel();
                 self.content_search_rx = Some(rx);
                 self.content_busy = true;
@@ -1406,7 +1421,7 @@ impl LunarApp {
                 self.content_results_kind = kind.clone();
                 self.content_search_kind = kind.clone();
                 self.status = format!("Searching {page_title}…");
-                std::thread::spawn(move || { let _ = tx.send(crate::content::search(&query, &kind).map_err(|error| error.to_string())); });
+                std::thread::spawn(move || { let _ = tx.send(crate::content::search_sorted(&query, &kind, &sort).map_err(|error| error.to_string())); });
             }
         });
         let description = match self.content_kind.as_str() {
@@ -2150,7 +2165,7 @@ impl LunarApp {
         let project = |point: (f32, f32, f32)| {
             let rx = point.0 * cos + point.2 * sin;
             let rz = -point.0 * sin + point.2 * cos;
-            (egui::pos2(rect.center().x + rx * 45.0, rect.center().y - point.1 * 45.0 + rz * 9.0), rz)
+            (egui::pos2(rect.center().x + rx * 45.0 * self.skin_zoom, rect.center().y - point.1 * 45.0 * self.skin_zoom + rz * 9.0 * self.skin_zoom), rz)
         };
         let mut faces: Vec<(f32, Vec<egui::Pos2>, Color32)> = Vec::new();
         let mut textured_faces: Vec<SkinTexturedFace> = Vec::new();
@@ -2209,6 +2224,11 @@ impl LunarApp {
             painter.add(egui::Shape::mesh(mesh));
         }
         painter.text(egui::pos2(rect.center().x, rect.bottom()-16.0), egui::Align2::CENTER_CENTER, "DRAG TO ROTATE", FontId::proportional(9.0), Color32::from_gray(145));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("ZOOM").size(9.0).strong().color(Color32::GRAY));
+            ui.add(egui::Slider::new(&mut self.skin_zoom, 0.65..=1.65).show_value(false));
+            if ui.small_button("Reset view").clicked() { self.skin_rotation = 0.45; self.skin_zoom = 1.0; }
+        });
     }
 
     fn skin_manager_ui(&mut self, ui: &mut egui::Ui) {
