@@ -97,14 +97,35 @@ fn flatten_text(value: &Value) -> String {
     }
 }
 
-pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
-    let (host, port) = if let Some(rest) = server.address.strip_prefix('[') {
+fn parse_server_address(address: &str) -> Result<(String, u16)> {
+    let address = address.trim();
+    if address.is_empty() || address.chars().any(char::is_whitespace) {
+        bail!("Enter a valid server address");
+    }
+    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
         let (host, suffix) = rest.split_once(']').context("Invalid IPv6 server address")?;
-        let port: u16 = suffix.strip_prefix(':').map(str::parse).transpose()?.unwrap_or(25565);
+        let port = match suffix {
+            "" => 25565,
+            value => value.strip_prefix(':').context("Invalid IPv6 server port")?.parse::<u16>()?,
+        };
         (host.to_owned(), port)
-    } else if let Some((host, port)) = server.address.rsplit_once(':') {
-        if !host.contains(':') { (host.to_owned(), port.parse::<u16>()?) } else { (server.address.clone(), 25565) }
-    } else { (server.address.clone(), 25565) };
+    } else if let Some((host, port)) = address.rsplit_once(':') {
+        if host.contains(':') {
+            (address.to_owned(), 25565)
+        } else {
+            (host.to_owned(), port.parse::<u16>()?)
+        }
+    } else {
+        (address.to_owned(), 25565)
+    };
+    if host.is_empty() || port == 0 || host.contains(['[', ']']) {
+        bail!("Enter a valid Minecraft server host and port");
+    }
+    Ok((host, port))
+}
+
+pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
+    let (host, port) = parse_server_address(&server.address)?;
     let address = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
     let socket = address.to_socket_addrs()?.next().context("Server address did not resolve")?;
     let started = Instant::now();
@@ -138,6 +159,21 @@ pub fn ping(server: &SavedServer) -> Result<ServerStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_server_addresses_and_default_ports() {
+        assert_eq!(parse_server_address("play.example.net").unwrap(), ("play.example.net".into(), 25565));
+        assert_eq!(parse_server_address("play.example.net:25570").unwrap(), ("play.example.net".into(), 25570));
+        assert_eq!(parse_server_address("[2001:db8::1]:25570").unwrap(), ("2001:db8::1".into(), 25570));
+        assert_eq!(parse_server_address("2001:db8::1").unwrap(), ("2001:db8::1".into(), 25565));
+    }
+
+    #[test]
+    fn rejects_invalid_server_addresses() {
+        for address in ["", "   ", "host:", "host:0", "host:65536", "[::1", "[::1]garbage", "two words"] {
+            assert!(parse_server_address(address).is_err(), "accepted {address}");
+        }
+    }
 
     #[test]
     fn encodes_varints() {
