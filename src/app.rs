@@ -2915,7 +2915,9 @@ impl eframe::App for LunarApp {
                                 if let Some(instance) = self.workspace_instances.iter().find(|entry| Some(entry.id.as_str()) == self.workspace_selected.as_deref()) {
                                     installed.game_directory = Some(crate::workspace::instance_path(&self.game_root, instance));
                                 } else {
-                                    installed.game_directory = Some(self.game_root.clone());
+                                    installed.game_directory = self.installed_version.as_ref()
+                                        .and_then(|version| version.game_directory.clone())
+                                        .or_else(|| Some(self.game_root.clone()));
                                 }
                                 self.installed_version = Some(installed);
                             }
