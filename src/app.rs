@@ -2616,6 +2616,8 @@ impl LunarApp {
                         installed.game_directory = Some(path);
                         match launcher::launch_offline_settings(&installed, &profile, instance.memory_mb, &instance.performance_mode, instance.java_major, &instance.jvm_arguments) {
                             Ok(process) => {
+                                self.installed_version = Some(installed.clone());
+                                self.workspace_selected = Some(instance.id.clone());
                                 self.game_process = Some(process);
                                 self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
                                 if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut instance) { self.status = error.to_string(); }
@@ -2956,6 +2958,8 @@ impl eframe::App for LunarApp {
                             installed.game_directory = Some(instance_path);
                             match launcher::launch_offline(&installed, &profile, instance.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
+                                    self.installed_version = Some(installed.clone());
+                                    self.workspace_selected = Some(instance.id.clone());
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), Some(instance.name.clone()));
                                     if let Err(error) = crate::workspace::record_launch(&self.game_root, &mut instance) { self.status = error.to_string(); }
@@ -2965,8 +2969,15 @@ impl eframe::App for LunarApp {
                                 Err(error) => self.status = format!("{error:#}"),
                             }
                         } else {
+                            if let Some(game_directory) = installed.game_directory.as_ref() {
+                                self.workspace_instances = crate::workspace::list_instances(&self.game_root).unwrap_or_default();
+                                self.workspace_selected = self.workspace_instances.iter()
+                                    .find(|entry| crate::workspace::instance_path(&self.game_root, entry) == *game_directory)
+                                    .map(|entry| entry.id.clone());
+                            }
                             match launcher::launch_offline(&installed, &profile, self.memory_mb, &self.performance_mode) {
                                 Ok(process) => {
+                                    self.installed_version = Some(installed.clone());
                                     self.game_process = Some(process);
                                     self.begin_play_session(installed.id.clone(), None);
                                     self.status = format!("Launching {}", installed.id);
