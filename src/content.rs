@@ -962,7 +962,7 @@ mod tests {
         assert!(safe_instance_component("C:outside").is_err());
         assert!(safe_instance_component("..").is_err());
         assert!(safe_instance_component(&"x".repeat(81)).is_err());
-        assert_eq!(safe_instance_component("1.20.1+build_2").is_err(), true);
+        assert!(safe_instance_component("1.20.1+build_2").is_err());
         assert_eq!(safe_instance_component("1.20.1-build_2").unwrap(), "1.20.1-build_2");
     }
 
