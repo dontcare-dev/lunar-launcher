@@ -219,7 +219,7 @@ impl LunarApp {
         let java_status = launcher::detect_java().unwrap_or_else(|_| "No system Java found. Lunar will download the compatible runtime automatically when Minecraft launches.".into());
         let preferences = LauncherPreferences::load();
         let workspace_instances = crate::workspace::list_instances(&game_root).unwrap_or_default();
-        let workspace_selected = None;
+        let workspace_selected = workspace_instances.first().map(|instance| instance.id.clone());
         let mut app = Self {
             profiles: ProfileStore::load(),
             screen: Screen::Home,
